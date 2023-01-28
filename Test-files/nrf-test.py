@@ -12,7 +12,7 @@ SPI0 = {
     'csn':dio.DigitalInOut(board.D8),
     }
 SPI1 = {
-    'MOSI':DigitalInOut(board.D10),
+    'MOSI':dio.DigitalInOut(board.D10),
     'MISO':dio.DigitalInOut(board.D9),
     'clock':dio.DigitalInOut(board.D11),
     'ce_pin':dio.DigitalInOut(board.D27),
