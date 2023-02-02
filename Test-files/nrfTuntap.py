@@ -9,4 +9,7 @@ tun = TunTap(nic_type="Tun", nic_name="tun0")
 tun.config(ip = ip, mask = mask, gateway = gate)
 
 
-print("IP: {ip} \n Mask: {mask} \n Gateway: {gate}".format(ip = ip, mask = mask, gate = gateway))
+print("IP: {ip} \n Mask: {mask} \n Gateway: {gate}".format(ip = ip, mask = mask, gate = gate))
+
+tun.close()
+
