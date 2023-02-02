@@ -14,7 +14,7 @@ try:  # on Linux
 
     SPI_BUS = spidev.SpiDev()  # for a faster interface on linux
     CSN_PIN = 0  # use CE0 on default bus (even faster than using any pin)
-    CE_PIN = DigitalInOut(board.D22)  # using pin gpio22 (BCM numbering)
+    CE_PIN = DigitalInOut(board.D17)  # using pin gpio22 (BCM numbering)
 
 except ImportError:  # on CircuitPython only
     # using board.SPI() automatically selects the MCU's
