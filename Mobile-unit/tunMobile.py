@@ -1,7 +1,7 @@
 from pytun import TunTapDevice
 ipBase = '20.0.0.1'
 ipMobile = '20.0.0.2'
-base = True
+base = False
 
 tun = TunTapDevice(name='longge')
 tun.addr = ipBase if base else ipMobile
