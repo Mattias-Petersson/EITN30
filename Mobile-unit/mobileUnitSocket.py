@@ -1,6 +1,6 @@
 import socket
 
-host = "127.0.0.1"
+host = "20.0.0.2"
 recieverPort = 9003 #Out of common port numbers on the Wiki, anything above 1024 is free to use and not reserved. 9003 is ours now.
 
 # Create a socket using the port number, bind the local hostname and the arbitrary port to it:

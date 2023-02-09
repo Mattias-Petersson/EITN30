@@ -1,6 +1,6 @@
 #!/bin/bash  
 
-pip3 install circuitpython-nrf24l01
-pip3 install python-pytuntap
+python3 -m pip install circuitpython-nrf24l01
+python3 -m pip install python-pytun
 
 echo "Installed all dependencies required. :)"
