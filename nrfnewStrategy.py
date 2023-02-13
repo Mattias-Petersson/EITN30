@@ -124,7 +124,7 @@ def receiver():
 
 
 
-if __name__ == "__main__":
+def main():
     sendThread = threading.Thread(target=sender)
     sendThread.start()
 
