@@ -97,9 +97,9 @@ def processReceived(data):
     for f in frag:
         nrf.send(f)
  
-
-def send(data):
-    outgoing.append(data)
+ICMPPacket = scape.IP(dst="8.8.8.8")/scape.ICMP()
+def send():
+    outgoing.append(ICMPPacket)
 
 def sender():
     while True:
