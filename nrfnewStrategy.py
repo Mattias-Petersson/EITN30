@@ -99,7 +99,7 @@ def processReceived(data):
  
 ICMPPacket = scape.IP(dst="8.8.8.8")/scape.ICMP()
 def send():
-    outgoing.append(ICMPPacket)
+    outgoing.put(ICMPPacket)
 
 def sender():
     while True:
