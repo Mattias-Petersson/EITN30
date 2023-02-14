@@ -21,7 +21,7 @@ SPI0 = {
     'ce_pin':dio.DigitalInOut(board.D17),
     'csn':dio.DigitalInOut(board.D8),
     }
-SPI1 = {
+SPI1 = {    
     'MOSI':dio.DigitalInOut(board.D20), #20, D10
     'MISO':dio.DigitalInOut(board.D19), #19, D9
     'clock':dio.DigitalInOut(board.D21), #21, D11
@@ -38,7 +38,12 @@ def fragment(data, fragmentSize):
 def defrag(dataList):
     """ Defragments and returns a packet. The input parameter has to be a fragmented IP packet as a list. (for now)
     """
-    data = scape.defragment(dataList)
+    data = b""
+
+    for d in dataList:
+        data += scape.raw(d)
+    #data = scape.defrag(dataList)
+    
     return data
  
 #processargs: kwargs={'nrf':tx_nrf, 'address':bytes(args.dst, 'utf-8'), 'queue': incoming, 'channel': args.txchannel, 'size':args.size})
@@ -69,11 +74,11 @@ def rx(nrf, address, tun: TunTapDevice, channel):
     while True:
         if nrf.available():
             size = nrf.any()
-            incoming.append(nrf.read(size))
-
+            packet = incoming.append(nrf.read(size))
+            tun.write(packet)
             print(incoming)
-        finished = defrag(incoming)
-        tun.write(finished)
+#        finished = defrag(incoming)
+#        tun.write(finished)
 
 # Troubleshooting tool. Since I am getting radio hardware not found, it is useful to break the program into smaller chunks. 
 def setupSingle(nrf):
