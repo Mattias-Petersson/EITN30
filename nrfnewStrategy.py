@@ -10,10 +10,11 @@ import scapy.all as scape
 import queue
 import argparse
 from circuitpython_nrf24l01.rf24 import RF24
+import spidev
 
-
+SPI_BUS0 = spidev.SpiDev()
+SPI_BUS1 = spidev.SpiDev()
 SPI0 = {
-    'SPI': 0,
     'MOSI':10,#dio.DigitalInOut(board.D10),
     'MISO':9,#dio.DigitalInOut(board.D9),
     'clock':11,#dio.DigitalInOut(board.D11),
@@ -21,7 +22,6 @@ SPI0 = {
     'csn':dio.DigitalInOut(board.D8),
     }
 SPI1 = {
-    'SPI': 10,
     'MOSI':dio.DigitalInOut(board.D20), #20, D10
     'MISO':dio.DigitalInOut(board.D19), #19, D9
     'clock':dio.DigitalInOut(board.D21), #21, D11
@@ -136,7 +136,7 @@ def main():
     #rx_nrf = RF24(SPI0['spi'], SPI0['csn'], SPI0['ce_pin'])
     #tx_nrf = RF24(SPI1['spi'], SPI1['csn'], SPI1['ce_pin'])
     #setupNRFModules(rx_nrf, tx_nrf)
-    nrf = RF24(SPI0['spi'], SPI0['csn'], SPI0['ce_pin'])
+    nrf = RF24(SPI_BUS0, SPI0['csn'], SPI0['ce_pin'])
 
     setupSingle(nrf)
     #These might not be needed, but they seem useful considering their get() blocks until data is available.
