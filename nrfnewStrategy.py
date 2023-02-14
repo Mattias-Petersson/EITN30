@@ -21,13 +21,14 @@ SPI0 = {
     'ce_pin':dio.DigitalInOut(board.D17),
     'csn':dio.DigitalInOut(board.D8),
     }
-SPI1 = {    
-    'MOSI':dio.DigitalInOut(board.D20), #20, D10
-    'MISO':dio.DigitalInOut(board.D19), #19, D9
-    'clock':dio.DigitalInOut(board.D21), #21, D11
+SPI1 = {
+    'MOSI':20,#dio.DigitalInOut(board.D10),
+    'MISO':19,#dio.DigitalInOut(board.D9),
+    'clock':21,#dio.DigitalInOut(board.D11),
     'ce_pin':dio.DigitalInOut(board.D27),
     'csn':dio.DigitalInOut(board.D18),
     }
+
 
 def fragment(data, fragmentSize):
     """ Fragments and returns a list of any IP packet. The input parameter has to be an IP packet, as this is done via Scapy. (for now) 
