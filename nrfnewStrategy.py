@@ -19,14 +19,14 @@ SPI0 = {
     'MISO':9,#dio.DigitalInOut(board.D9),
     'clock':11,#dio.DigitalInOut(board.D11),
     'ce_pin':dio.DigitalInOut(board.D17),
-    'csn':dio.DigitalInOut(board.D8),
+    'csn':0, #dio.DigitalInOut(board.D8),
     }
 SPI1 = {
     'MOSI':20,#dio.DigitalInOut(board.D10),
     'MISO':19,#dio.DigitalInOut(board.D9),
     'clock':21,#dio.DigitalInOut(board.D11),
     'ce_pin':dio.DigitalInOut(board.D27),
-    'csn':dio.DigitalInOut(board.D18),
+    'csn':dio.DigitalInOut(board.D8),
     }
 
 
@@ -139,10 +139,10 @@ def main():
 
     # initialize the nRF24L01 on the spi bus object
   
-    #rx_nrf = RF24(SPI0['spi'], SPI0['csn'], SPI0['ce_pin'])
-    #tx_nrf = RF24(SPI1['spi'], SPI1['csn'], SPI1['ce_pin'])
+    rx_nrf = RF24(SPI0['spi'], SPI0['csn'], SPI0['ce_pin'])
+    tx_nrf = RF24(SPI1['spi'], SPI1['csn'], SPI1['ce_pin'])
     #setupNRFModules(rx_nrf, tx_nrf)
-    nrf = RF24(SPI_BUS0, SPI0['csn'], SPI0['ce_pin'])
+    #nrf = RF24(SPI_BUS0, SPI0['csn'], SPI0['ce_pin'])
 
     setupSingle(nrf)
     #These might not be needed, but they seem useful considering their get() blocks until data is available.
@@ -150,14 +150,14 @@ def main():
 
     tun = setupIP(args.base)
 
-    nrf_process = Process(target=rx, kwargs={'nrf':nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
-    nrf_process.start()
-    #rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
-    #rx_process.start()
+    #nrf_process = Process(target=rx, kwargs={'nrf':nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
+    #nrf_process.start()
+    rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
+    rx_process.start()
     time.sleep(1)
 
-    #tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(args.dst, 'utf-8'), 'queue': outgoing, 'channel': args.txchannel, 'size':args.size})
-    #tx_process.start()
+    tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(args.dst, 'utf-8'), 'queue': outgoing, 'channel': args.txchannel, 'size':args.size})
+    tx_process.start()
 
     ICMPPacket = scape.IP(dst="8.8.8.8")/scape.ICMP() # Merely for testing. Remove later. 
 
@@ -175,7 +175,7 @@ def main():
     print("Address:  {} \n Destination: {} \n Network mask: {}".format(tun.addr, tun.dstaddr, tun.netmask) )
 
 
-    #tx_process.join()
-    #rx_process.join()
+    tx_process.join()
+    rx_process.join()
     tun.down()
     print("Threads ended successfully, please stand by.")
