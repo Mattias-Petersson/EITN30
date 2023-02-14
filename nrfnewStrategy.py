@@ -19,7 +19,7 @@ SPI0 = {
     'MISO':9,#dio.DigitalInOut(board.D9),
     'clock':11,#dio.DigitalInOut(board.D11),
     'ce_pin':dio.DigitalInOut(board.D17),
-    'csn':0, #dio.DigitalInOut(board.D8),
+    'csn':dio.DigitalInOut(board.D8),
     }
 SPI1 = {
     'MOSI':20,#dio.DigitalInOut(board.D10),
@@ -74,9 +74,13 @@ def rx(nrf, address, tun: TunTapDevice, channel):
     print("Init RX")
     while True:
         if nrf.available():
+            
             size = nrf.any()
-            packet = incoming.append(nrf.read(size))
-            tun.write(packet)
+            test = nrf.read(size)
+            if test is not None:
+                tun.write(test)
+            #packet = incoming.append(nrf.read(size))
+            #tun.write(test)
             print(incoming)
 #        finished = defrag(incoming)
 #        tun.write(finished)
@@ -94,9 +98,10 @@ def setupNRFModules(rx, tx):
     # From the API, 1 sets freq to 1Mbps, 2 sets freq to 2Mbps, 250 to 250kbps.
     rx.data_rate = 2 
     tx.data_rate = 2
-    # Look into what channels are the least populated. 
-   # rx.channel = ??
-   # tx.channel = ??
+    
+    #TODO: Look into what channels are the least populated. 
+
+
    
     rx.ack = True
     tx.ack = True
@@ -133,7 +138,7 @@ def main():
     args = parser.parse_args()
 
     #With a data rate of 2 Mbps, we need to at least tell the user that the channels should be at least 2Mhz from each other to ensure no cross talk. 
-    if abs(args.txchannel) - abs(args.rxchannel < 2):
+    if abs(args.txchannel - args.rxchannel) < 2:
         print("Do note that having tx and rx channels this close to each other can introduce cross-talk.")
 
 
@@ -142,16 +147,19 @@ def main():
     rx_nrf = RF24(SPI0['spi'], SPI0['csn'], SPI0['ce_pin'])
     tx_nrf = RF24(SPI1['spi'], SPI1['csn'], SPI1['ce_pin'])
     #setupNRFModules(rx_nrf, tx_nrf)
+    
     #nrf = RF24(SPI_BUS0, SPI0['csn'], SPI0['ce_pin'])
-
-    setupSingle(nrf)
+    #setupSingle(nrf)
+    #nrf_process = Process(target=rx, kwargs={'nrf':nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
+    #nrf_process.start()
+    
+    
+    
     #These might not be needed, but they seem useful considering their get() blocks until data is available.
     outgoing = queue.Queue()
 
     tun = setupIP(args.base)
 
-    #nrf_process = Process(target=rx, kwargs={'nrf':nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
-    #nrf_process.start()
     rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
     rx_process.start()
     time.sleep(1)
@@ -169,6 +177,7 @@ def main():
 
     except KeyboardInterrupt:
         #Can this interrupt a while true loop? Let's try.
+        print("Hey, do we get here?")
         exit
 
 
