@@ -75,6 +75,12 @@ def rx(nrf, address, tun: TunTapDevice, channel):
         finished = defrag(incoming)
         tun.write(finished)
 
+# Troubleshooting tool. Since I am getting radio hardware not found, it is useful to break the program into smaller chunks. 
+def setupSingle(nrf):
+    nrf.data_rate = 2
+    nrf.ack = True
+    nrf.payload_length = 32
+    nrf.crc = 1
 
 def setupNRFModules(rx, tx):
     
@@ -125,28 +131,27 @@ def main():
         print("Do note that having tx and rx channels this close to each other can introduce cross-talk.")
 
 
-    SPI0['spi'] = busio.SPI(**{x: SPI0[x] for x in ['clock', 'MOSI', 'MISO']})
-    SPI1['spi'] = busio.SPI(**{x: SPI1[x] for x in ['clock', 'MOSI', 'MISO']})
-
     # initialize the nRF24L01 on the spi bus object
   
-    rx_nrf = RF24(SPI0['spi'], SPI0['csn'], SPI0['ce_pin'])
-    tx_nrf = RF24(SPI1['spi'], SPI1['csn'], SPI1['ce_pin'])
-    setupNRFModules(rx_nrf, tx_nrf)
+    #rx_nrf = RF24(SPI0['spi'], SPI0['csn'], SPI0['ce_pin'])
+    #tx_nrf = RF24(SPI1['spi'], SPI1['csn'], SPI1['ce_pin'])
+    #setupNRFModules(rx_nrf, tx_nrf)
+    nrf = RF24(SPI0['spi'], SPI0['csn'], SPI0['ce_pin'])
 
+    setupSingle(nrf)
     #These might not be needed, but they seem useful considering their get() blocks until data is available.
     outgoing = queue.Queue()
 
     tun = setupIP(args.base)
 
-
-
-    rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
-    rx_process.start()
+    nrf_process = Process(target=rx, kwargs={'nrf':nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
+    nrf_process.start()
+    #rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
+    #rx_process.start()
     time.sleep(1)
 
-    tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(args.dst, 'utf-8'), 'queue': outgoing, 'channel': args.txchannel, 'size':args.size})
-    tx_process.start()
+    #tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(args.dst, 'utf-8'), 'queue': outgoing, 'channel': args.txchannel, 'size':args.size})
+    #tx_process.start()
 
     ICMPPacket = scape.IP(dst="8.8.8.8")/scape.ICMP() # Merely for testing. Remove later. 
 
@@ -164,7 +169,7 @@ def main():
     print("Address:  {} \n Destination: {} \n Network mask: {}".format(tun.addr, tun.dstaddr, tun.netmask) )
 
 
-    tx_process.join()
-    rx_process.join()
+    #tx_process.join()
+    #rx_process.join()
     tun.down()
     print("Threads ended successfully, please stand by.")
