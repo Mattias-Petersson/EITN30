@@ -31,7 +31,7 @@ SPI1 = {
     }
 """
 SPI0 = {
-    'csn':dio.DigitalInOut(board.D0),
+    'csn':dio.DigitalInOut(board.D8),
     'clock':11,#dio.DigitalInOut(board.D11),
     'MOSI':10,#dio.DigitalInOut(board.D10),
     'MISO':9,#dio.DigitalInOut(board.D9),
@@ -78,7 +78,7 @@ def tx(nrf: RF24, address, queue: queue, channel, size):
     print("Init TX")
     while True:
         packet = queue.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
-
+        print(packet) #TODO: DELETE. 
         frags = fragment(packet, size)
         for f in frags:
             nrf.send(f)
@@ -98,11 +98,13 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
             
             size = nrf.any()
             test = nrf.read(size)
+            print(test) #TODO, DELETE THIS.
             if test is not None:
+                print(test) #TODO: Delete this.
                 tun.write(test)
             #packet = incoming.append(nrf.read(size))
             #tun.write(test)
-            print(incoming)
+            #print(incoming)
 #        finished = defrag(incoming)
 #        tun.write(finished)
 
@@ -171,6 +173,7 @@ def main():
     
     nrf = RF24(SPI_BUS1, SPI0['csn'], SPI1['ce_pin'])
     setupSingle(nrf)
+    tun = setupIP(args.base)
     nrf_process = Process(target=rx, kwargs={'nrf':nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
     nrf_process.start()
     
@@ -179,7 +182,7 @@ def main():
     #These might not be needed, but they seem useful considering their get() blocks until data is available.
     outgoing = queue.Queue()
 
-    tun = setupIP(args.base)
+
     """
     rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
     rx_process.start()
@@ -193,6 +196,7 @@ def main():
     try:
         while True:
             packet = tun.read(tun.mtu)
+            print(packet)
             outgoing.put(packet)
 
 
