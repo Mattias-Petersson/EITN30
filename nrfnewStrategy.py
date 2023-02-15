@@ -14,7 +14,7 @@ import spidev
 
 SPI_BUS0 = spidev.SpiDev()
 SPI_BUS1 = spidev.SpiDev()
-"""
+
 SPI0 = {
     'MOSI':10,#dio.DigitalInOut(board.D10),
     'MISO':9,#dio.DigitalInOut(board.D9),
@@ -27,30 +27,9 @@ SPI1 = {
     'MISO':19,#dio.DigitalInOut(board.D9),
     'clock':21,#dio.DigitalInOut(board.D11),
     'ce_pin':dio.DigitalInOut(board.D27),
-    'csn':dio.DigitalInOut(board.D8), #Not allowed to be on the same PIN as SPI0!
+    'csn':dio.DigitalInOut(board.D18), #Not allowed to be on the same PIN as SPI0! No other configuration of this works. 
     }
-"""
-SPI0 = {
-    'csn':dio.DigitalInOut(board.D8),
-    'clock':11,#dio.DigitalInOut(board.D11),
-    'MOSI':10,#dio.DigitalInOut(board.D10),
-    'MISO':9,#dio.DigitalInOut(board.D9),
-    'ce_pin':dio.DigitalInOut(board.D17),
-    }
-SPI1 = {
-    'csn':dio.DigitalInOut(board.D1),
-    'clock':21,#dio.DigitalInOut(board.D11),
-    'MOSI':20,#dio.DigitalInOut(board.D10),
-    'MISO':19,#dio.DigitalInOut(board.D9),
-    'ce_pin':dio.DigitalInOut(board.D27),
-    }
-#Tuples to try:
-# 1: (0, 11, 10, 9)
-# 2: (1, 21, 20, 19)
-# 3: (2, 42, 41, 40)
-# 4: (3, 3, 2, 1)
-# 5: (4, 7, 6, 5)
-# 6: (5, 15, 14, 13)
+
 def fragment(data, fragmentSize):
     """ Fragments and returns a list of any IP packet. The input parameter has to be an IP packet, as this is done via Scapy. (for now) 
     """
@@ -78,7 +57,7 @@ def tx(nrf: RF24, address, queue: queue, channel, size):
     print("Init TX")
     while True:
         packet = queue.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
-        print(packet) #TODO: DELETE. 
+        print("TX: {}".format(packet)) #TODO: DELETE. 
         frags = fragment(packet, size)
         for f in frags:
             nrf.send(f)
@@ -98,9 +77,9 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
             
             size = nrf.any()
             test = nrf.read(size)
-            print(test) #TODO, DELETE THIS.
+            print("Before null check: {}".format(test)) #TODO, DELETE THIS.
             if test is not None:
-                print(test) #TODO: Delete this.
+                print("After null check: {}".format(test)) #TODO: Delete this.
                 tun.write(test)
             #packet = incoming.append(nrf.read(size))
             #tun.write(test)
@@ -196,7 +175,7 @@ def main():
     try:
         while True:
             packet = tun.read(tun.mtu)
-            print(packet)
+            print("From TUN: {}".format(packet))
             outgoing.put(packet)
 
 
