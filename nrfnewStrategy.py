@@ -1,3 +1,4 @@
+import math
 from multiprocessing import Process, Queue
 import sys
 import time
@@ -59,7 +60,14 @@ def tx(nrf: RF24, address, channel, size):
             packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
             print("This should not.")
             print("TX: {}".format(packet)) #TODO: DELETE. 
-            nrf.send(packet)
+            lengthOfPacket = math.ciel(len(packet)/32)
+            print(lengthOfPacket)
+            for _ in range(lengthOfPacket):
+                temp = packet[0:32]
+
+                nrf.send(temp)
+                packet = packet[32:]
+
             #frags = fragment(packet, size)
             #for f in frags:
             #    nrf.send(f)
