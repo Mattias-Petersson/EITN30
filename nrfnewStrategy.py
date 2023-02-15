@@ -14,6 +14,7 @@ import spidev
 
 SPI_BUS0 = spidev.SpiDev()
 SPI_BUS1 = spidev.SpiDev()
+"""
 SPI0 = {
     'MOSI':10,#dio.DigitalInOut(board.D10),
     'MISO':9,#dio.DigitalInOut(board.D9),
@@ -26,10 +27,30 @@ SPI1 = {
     'MISO':19,#dio.DigitalInOut(board.D9),
     'clock':21,#dio.DigitalInOut(board.D11),
     'ce_pin':dio.DigitalInOut(board.D27),
-    'csn':dio.DigitalInOut(board.D8),
+    'csn':dio.DigitalInOut(board.D8), #Not allowed to be on the same PIN as SPI0!
     }
-
-
+"""
+SPI0 = {
+    'csn':dio.DigitalInOut(board.D0),
+    'clock':11,#dio.DigitalInOut(board.D11),
+    'MOSI':10,#dio.DigitalInOut(board.D10),
+    'MISO':9,#dio.DigitalInOut(board.D9),
+    'ce_pin':dio.DigitalInOut(board.D17),
+    }
+SPI1 = {
+    'csn':dio.DigitalInOut(board.D1),
+    'clock':21,#dio.DigitalInOut(board.D11),
+    'MOSI':20,#dio.DigitalInOut(board.D10),
+    'MISO':19,#dio.DigitalInOut(board.D9),
+    'ce_pin':dio.DigitalInOut(board.D27),
+    }
+#Tuples to try:
+# 1: (0, 11, 10, 9)
+# 2: (1, 21, 20, 19)
+# 3: (2, 42, 41, 40)
+# 4: (3, 3, 2, 1)
+# 5: (4, 7, 6, 5)
+# 6: (5, 15, 14, 13)
 def fragment(data, fragmentSize):
     """ Fragments and returns a list of any IP packet. The input parameter has to be an IP packet, as this is done via Scapy. (for now) 
     """
@@ -65,7 +86,7 @@ def tx(nrf: RF24, address, queue: queue, channel, size):
         print("Do we get here? and if so, how often do we get here?")
 
 #processargs: kwargs={'nrf':rx_nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
-def rx(nrf, address, tun: TunTapDevice, channel):
+def rx(nrf: RF24, address, tun: TunTapDevice, channel):
     incoming = []
     nrf.open_rx_pipe(1, address) # Use pipe 1.
     nrf.listen = True
@@ -144,14 +165,14 @@ def main():
 
     # initialize the nRF24L01 on the spi bus object
   
-    rx_nrf = RF24(SPI_BUS0, SPI0['csn'], SPI0['ce_pin'])
-    tx_nrf = RF24(SPI_BUS1, SPI1['csn'], SPI1['ce_pin'])
-    setupNRFModules(rx_nrf, tx_nrf)
+    #rx_nrf = RF24(SPI_BUS0, SPI0['csn'], SPI0['ce_pin'])
+    #tx_nrf = RF24(SPI_BUS1, SPI1['csn'], SPI1['ce_pin'])
+    #setupNRFModules(rx_nrf, tx_nrf)
     
-    #nrf = RF24(SPI_BUS0, SPI0['csn'], SPI0['ce_pin'])
-    #setupSingle(nrf)
-    #nrf_process = Process(target=rx, kwargs={'nrf':nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
-    #nrf_process.start()
+    nrf = RF24(SPI_BUS1, SPI0['csn'], SPI1['ce_pin'])
+    setupSingle(nrf)
+    nrf_process = Process(target=rx, kwargs={'nrf':nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
+    nrf_process.start()
     
     
     
@@ -159,7 +180,7 @@ def main():
     outgoing = queue.Queue()
 
     tun = setupIP(args.base)
-
+    """
     rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
     rx_process.start()
     time.sleep(1)
@@ -168,7 +189,7 @@ def main():
     tx_process.start()
 
     ICMPPacket = scape.IP(dst="8.8.8.8")/scape.ICMP() # Merely for testing. Remove later. 
-
+    """
     try:
         while True:
             packet = tun.read(tun.mtu)
@@ -183,8 +204,10 @@ def main():
 
     print("Address:  {} \n Destination: {} \n Network mask: {}".format(tun.addr, tun.dstaddr, tun.netmask) )
 
-
+    """
     tx_process.join()
     rx_process.join()
+    """
+    nrf_process.join()
     tun.down()
     print("Threads ended successfully, please stand by.")
