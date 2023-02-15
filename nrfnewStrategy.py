@@ -60,11 +60,11 @@ def tx(nrf: RF24, address, channel, size):
             packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
             print("This should not.")
             print("TX: {}".format(packet)) #TODO: DELETE. 
-            lengthOfPacket = math.ciel(len(packet)/32)
+            lengthOfPacket = math.ceil(len(packet)/32)
             print(lengthOfPacket)
             for _ in range(lengthOfPacket):
                 temp = packet[0:32]
-
+                print(nrf.send(temp))
                 nrf.send(temp)
                 packet = packet[32:]
 
@@ -83,14 +83,14 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
     
     print("Init RX")
     while True:
-        if nrf.available():
-            
+        if nrf.available():     
             size = nrf.any()
             test = nrf.read(size)
+            packet = bytes(test)
             print("Before null check: {}".format(test)) #TODO, DELETE THIS.
-            if test is not None:
+            if packet is not None:
                 print("After null check: {}".format(test)) #TODO: Delete this.
-                tun.write(test)
+                tun.write(packet)
             #packet = incoming.append(nrf.read(size))
             #tun.write(test)
             #print(incoming)
@@ -137,11 +137,15 @@ def setupIP(isBase):
     tun.up()
     return tun
 
+
+
+
+address = [b"1Node", b"2Node"]
 def main():
     parser = argparse.ArgumentParser(description='NRF24L01+')
     parser.add_argument('--isBase', dest='base', type= bool, default=True, help='If this is a base-station, set it to True.') 
-    parser.add_argument('--src', dest='src', type=str, default='me', help='NRF24L01+\'s source address')
-    parser.add_argument('--dst', dest='dst', type=str, default='me', help='NRF24L01+\'s destination address')
+    parser.add_argument('--src', dest='src', type=str, default='Node1', help='NRF24L01+\'s source address')
+    parser.add_argument('--dst', dest='dst', type=str, default='Node2', help='NRF24L01+\'s destination address')
     parser.add_argument('--count', dest='cnt', type=int, default=10, help='Number of transmissions')
     parser.add_argument('--size', dest='size', type=int, default=32, help='Packet size') 
     parser.add_argument('--txchannel', dest='txchannel', type=int, default=76, help='Tx channel', choices=range(0,125)) 
@@ -183,7 +187,7 @@ def main():
 
     ICMPPacket = scape.IP(dst="8.8.8.8")/scape.ICMP() # Merely for testing. Remove later. 
     """
-    try:
+    try:    
         while True:
             packet = tun.read(tun.mtu)
             print("From TUN: {}".format(packet))
