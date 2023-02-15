@@ -1,4 +1,4 @@
-from multiprocessing import Process
+from multiprocessing import Process, Queue
 import sys
 import time
 import struct
@@ -7,14 +7,13 @@ import digitalio as dio
 import busio
 from pytun import TunTapDevice
 import scapy.all as scape
-import queue
 import argparse
 from circuitpython_nrf24l01.rf24 import RF24
 import spidev
 
 SPI_BUS0 = spidev.SpiDev()
 SPI_BUS1 = spidev.SpiDev()
-
+global outgoing; outgoing = Queue.Queue()
 SPI0 = {
     'MOSI':10,#dio.DigitalInOut(board.D10),
     'MISO':9,#dio.DigitalInOut(board.D9),
@@ -56,13 +55,16 @@ def tx(nrf: RF24, address, queue: queue, channel, size):
 
     print("Init TX")
     while True:
-        packet = queue.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
-        print("TX: {}".format(packet)) #TODO: DELETE. 
-        frags = fragment(packet, size)
-        for f in frags:
-            nrf.send(f)
+            print("Size of the queue? {}".format(outgoing.qsize()))
+            time.sleep(3)
+            packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
+            print("This should not.")
+            print("TX: {}".format(packet)) #TODO: DELETE. 
+            frags = fragment(packet, size)
+            for f in frags:
+                nrf.send(f)
 
-        print("Do we get here? and if so, how often do we get here?")
+            print("Do we get here? and if so, how often do we get here?")
 
 #processargs: kwargs={'nrf':rx_nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
 def rx(nrf: RF24, address, tun: TunTapDevice, channel):
@@ -151,15 +153,16 @@ def main():
     #setupNRFModules(rx_nrf, tx_nrf)
     
     nrf = RF24(SPI_BUS1, SPI0['csn'], SPI1['ce_pin'])
+    #These might not be needed, but they seem useful considering their get() blocks until data is available.
     setupSingle(nrf)
     tun = setupIP(args.base)
-    nrf_process = Process(target=rx, kwargs={'nrf':nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
+    #nrf_process = Process(target=rx, kwargs={'nrf':nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
+    nrf_process = Process(target=tx, kwargs={'nrf':nrf, 'address':bytes(args.dst, 'utf-8'), 'queue': outgoing, 'channel': args.txchannel, 'size':args.size})
     nrf_process.start()
     
     
     
-    #These might not be needed, but they seem useful considering their get() blocks until data is available.
-    outgoing = queue.Queue()
+
 
 
     """
@@ -177,6 +180,7 @@ def main():
             packet = tun.read(tun.mtu)
             print("From TUN: {}".format(packet))
             outgoing.put(packet)
+            print(outgoing._qsize())
 
 
     except KeyboardInterrupt:
