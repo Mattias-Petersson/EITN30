@@ -13,7 +13,7 @@ import spidev
 
 SPI_BUS0 = spidev.SpiDev()
 SPI_BUS1 = spidev.SpiDev()
-global outgoing; outgoing = Queue.Queue()
+global outgoing; outgoing = Queue()
 SPI0 = {
     'MOSI':10,#dio.DigitalInOut(board.D10),
     'MISO':9,#dio.DigitalInOut(board.D9),
@@ -47,7 +47,7 @@ def defrag(dataList):
     return data
  
 #processargs: kwargs={'nrf':tx_nrf, 'address':bytes(args.dst, 'utf-8'), 'queue': incoming, 'channel': args.txchannel, 'size':args.size})
-def tx(nrf: RF24, address, queue: queue, channel, size):
+def tx(nrf: RF24, address, channel, size):
     nrf.open_tx_pipe(address)
     nrf.listen = False
     nrf.channel = channel
@@ -56,13 +56,13 @@ def tx(nrf: RF24, address, queue: queue, channel, size):
     print("Init TX")
     while True:
             print("Size of the queue? {}".format(outgoing.qsize()))
-            time.sleep(3)
             packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
             print("This should not.")
             print("TX: {}".format(packet)) #TODO: DELETE. 
-            frags = fragment(packet, size)
-            for f in frags:
-                nrf.send(f)
+            nrf.send(packet)
+            #frags = fragment(packet, size)
+            #for f in frags:
+            #    nrf.send(f)
 
             print("Do we get here? and if so, how often do we get here?")
 
@@ -157,7 +157,7 @@ def main():
     setupSingle(nrf)
     tun = setupIP(args.base)
     #nrf_process = Process(target=rx, kwargs={'nrf':nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
-    nrf_process = Process(target=tx, kwargs={'nrf':nrf, 'address':bytes(args.dst, 'utf-8'), 'queue': outgoing, 'channel': args.txchannel, 'size':args.size})
+    nrf_process = Process(target=tx, kwargs={'nrf':nrf, 'address':bytes(args.dst, 'utf-8'), 'channel': args.txchannel, 'size':args.size})
     nrf_process.start()
     
     
@@ -180,7 +180,7 @@ def main():
             packet = tun.read(tun.mtu)
             print("From TUN: {}".format(packet))
             outgoing.put(packet)
-            print(outgoing._qsize())
+            print("In main thread, size of the queue is: {}".format(outgoing.qsize()))
 
 
     except KeyboardInterrupt:
