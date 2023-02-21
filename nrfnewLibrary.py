@@ -65,8 +65,8 @@ def tx(nrf: RF24, address, channel, size):
             print("This should not.")
             print("TX: {}".format(packet)) #TODO: DELETE. 
             fragments = fragment(packet, size)
-            for _ in fragments:
-                nrf.write(fragments)
+            for i in fragments:
+                nrf.write(i)
         
             
 
@@ -77,7 +77,8 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
     print("Init RX on channel {}".format(channel))
     incoming = []
     while True:
-        if nrf.available():
+        hasData, whatPipe = nrf.available_pipe()
+        if hasData:
             size = nrf.getDynamicPayLoadSize()
             print(size)
             test = nrf.read(size)
