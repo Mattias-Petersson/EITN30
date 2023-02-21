@@ -30,21 +30,25 @@ SPI1 = {
     'csn':dio.DigitalInOut(board.D18), #Not allowed to be on the same PIN as SPI0! No other configuration of this works. 
     }
 
-def fragment(data, fragmentSize):
-    """ Fragments and returns a list of any IP packet. The input parameter has to be an IP packet, as this is done via Scapy. (for now) 
+def fragment(packet, fragmentSize):
+
+    """ Fragments and returns a list of bytes. This is done by finding the number of fragments we want, and then splitting the bytes-like object into chunks of appropriate size. 
+    The input parameter is an IP packet (or any bytes-like object) and the size the method should fragment these into.  
     """
-    frags = scape.fragment(data, fragsize=fragmentSize)
+    frags = []
+    dataRaw = scape.raw(packet)
+    numSteps = math.ceil(len(dataRaw)/fragmentSize)
+    print(numSteps)
+    for _ in range(numSteps):
+        frags.append(dataRaw[0:32])
+        dataRaw = dataRaw[32:]
+
     return frags
 
-def defrag(dataList):
+def defragment(dataList):
     """ Defragments and returns a packet. The input parameter has to be a fragmented IP packet as a list. (for now)
     """
     data = b""
-
-    for d in dataList:
-        data += scape.raw(d)
-    #data = scape.defrag(dataList)
-    
     return data
  
 #processargs: kwargs={'nrf':tx_nrf, 'address':bytes(args.dst, 'utf-8'), 'queue': incoming, 'channel': args.txchannel, 'size':args.size})
@@ -52,40 +56,33 @@ def tx(nrf: RF24, address, channel, size):
     nrf.open_tx_pipe(address)
     nrf.listen = False
     nrf.channel = channel
+    print("Init TX on channel {}".format(channel))
 
-
-    print("Init TX")
     while True:
             print("Size of the queue? {}".format(outgoing.qsize()))
             packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
             print("This should not.")
             print("TX: {}".format(packet)) #TODO: DELETE. 
-            lengthOfPacket = math.ceil(len(packet)/32)
-            print(lengthOfPacket)
-            for _ in range(lengthOfPacket):
-                temp = packet[0:32]
-                print(nrf.send(temp))
-                nrf.send(temp)
-                packet = packet[32:]
-
-            #frags = fragment(packet, size)
-            #for f in frags:
-            #    nrf.send(f)
-
-            print("Do we get here? and if so, how often do we get here?")
+            fragments = fragment(packet, size)
+            for _ in fragments:
+                nrf.send(fragments)
+        
+            
 
 #processargs: kwargs={'nrf':rx_nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
 def rx(nrf: RF24, address, tun: TunTapDevice, channel):
-    incoming = []
     nrf.open_rx_pipe(1, address) # Use pipe 1.
     nrf.listen = True
-    nrf.channel = channel
-    
-    print("Init RX")
+    nrf.channel = channel 
+    print("Init RX on channel {}".format(channel))
+    incoming = []
     while True:
-        if nrf.available():     
+        if nrf.available():
             size = nrf.any()
+            print(size)
             test = nrf.read(size)
+            print(test)
+            print(type(test))
             packet = bytes(test)
             print("Before null check: {}".format(test)) #TODO, DELETE THIS.
             if packet is not None:
