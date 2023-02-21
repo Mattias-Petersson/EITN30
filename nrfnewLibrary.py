@@ -158,7 +158,9 @@ def main():
     # initialize the nRF24L01 on the spi bus object
   
     rx_nrf = RF24(17, 0)
+    rx_nrf.begin()
     tx_nrf = RF24(27, 10)
+    tx_nrf.begin()
     #setupNRFModules(rx_nrf, tx_nrf)
     
     #nrf = RF24(SPI_BUS1, SPI0['csn'], SPI1['ce_pin'])
