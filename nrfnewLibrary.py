@@ -66,7 +66,7 @@ def tx(nrf: RF24, address, channel, size):
             print("TX: {}".format(packet)) #TODO: DELETE. 
             fragments = fragment(packet, size)
             for _ in fragments:
-                nrf.send(fragments)
+                nrf.write(fragments)
         
             
 
@@ -78,7 +78,7 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
     incoming = []
     while True:
         if nrf.available():
-            size = nrf.any()
+            size = nrf.getDynamicPayLoadSize()
             print(size)
             test = nrf.read(size)
             print(test)
