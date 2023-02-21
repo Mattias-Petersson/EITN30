@@ -33,8 +33,6 @@ SPI1 = {
     }
 """
 
-RXradio = RF24(17, 0)
-TXradio = RF24(27, 10)
 def fragment(packet, fragmentSize):
 
     """ Fragments and returns a list of bytes. This is done by finding the number of fragments we want, and then splitting the bytes-like object into chunks of appropriate size. 
@@ -159,8 +157,8 @@ def main():
 
     # initialize the nRF24L01 on the spi bus object
   
-    #rx_nrf = RF24(SPI_BUS0, SPI0['csn'], SPI0['ce_pin'])
-    #tx_nrf = RF24(SPI_BUS1, SPI1['csn'], SPI1['ce_pin'])
+    rx_nrf = RF24(17, 0)
+    tx_nrf = RF24(27, 10)
     #setupNRFModules(rx_nrf, tx_nrf)
     
     #nrf = RF24(SPI_BUS1, SPI0['csn'], SPI1['ce_pin'])
@@ -168,24 +166,20 @@ def main():
     #setupSingle(nrf)
     tun = setupIP(args.base)
     #nrf_process = Process(target=rx, kwargs={'nrf':nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
-    nrf_process = Process(target=tx, kwargs={'nrf':nrf, 'address':bytes(args.dst, 'utf-8'), 'channel': args.txchannel, 'size':args.size})
-    nrf_process.start()
+    #nrf_process = Process(target=tx, kwargs={'nrf':nrf, 'address':bytes(args.dst, 'utf-8'), 'channel': args.txchannel, 'size':args.size})
+    #nrf_process.start()
     
     
     
-
-
-
-    """
     rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
     rx_process.start()
     time.sleep(1)
 
-    tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(args.dst, 'utf-8'), 'queue': outgoing, 'channel': args.txchannel, 'size':args.size})
+    tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(args.dst, 'utf-8'), 'channel': args.txchannel, 'size':args.size})
     tx_process.start()
 
     ICMPPacket = scape.IP(dst="8.8.8.8")/scape.ICMP() # Merely for testing. Remove later. 
-    """
+    
     try:    
         while True:
             packet = tun.read(tun.mtu)
@@ -202,10 +196,10 @@ def main():
 
     print("Address:  {} \n Destination: {} \n Network mask: {}".format(tun.addr, tun.dstaddr, tun.netmask) )
 
-    """
+    
     tx_process.join()
     rx_process.join()
-    """
-    nrf_process.join()
+    
+    #nrf_process.join()
     tun.down()
     print("Threads ended successfully, please stand by.")
