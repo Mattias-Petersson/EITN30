@@ -9,7 +9,7 @@ import busio
 from pytun import TunTapDevice
 import scapy.all as scape
 import argparse
-from RF24 import RF24, RF24_PA_LOW
+from RF24 import RF24, RF24_PA_LOW, RF24_2MBPS,RF24_CRC_8
 import spidev
 
 global outgoing; outgoing = Queue()
@@ -57,8 +57,9 @@ def defragment(dataList):
 #processargs: kwargs={'nrf':tx_nrf, 'address':bytes(args.dst, 'utf-8'), 'queue': incoming, 'channel': args.txchannel, 'size':args.size})
 def tx(nrf: RF24, address, channel, size):
     nrf.openWritingPipe(address)
+    nrf.stopListening()
     print("Init TX on channel {}".format(channel))
-
+    nrf.printDetails()
     while True:
             print("Size of the queue? {}".format(outgoing.qsize()))
             packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
@@ -73,8 +74,9 @@ def tx(nrf: RF24, address, channel, size):
 #processargs: kwargs={'nrf':rx_nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
 def rx(nrf: RF24, address, tun: TunTapDevice, channel):
     nrf.openReadingPipe(1, address)
-     
+    nrf.startListening()
     print("Init RX on channel {}".format(channel))
+    nrf.printDetails()
     incoming = []
     while True:
         hasData, whatPipe = nrf.available_pipe()
@@ -97,31 +99,31 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
 
 # Troubleshooting tool. Since I am getting radio hardware not found, it is useful to break the program into smaller chunks. 
 def setupSingle(nrf):
-    nrf.data_rate = 2
-    nrf.ack = True
-    nrf.payload_length = 32
-    nrf.crc = 1
+    nrf.setDataRate(RF24_2MBPS) 
+    nrf.setAutoAck(True)
+    nrf.payloadSize = 32
+    nrf.setCRCLength(RF24_CRC_8)
+    nrf.setPALevel(RF24_PA_LOW)
 
 def setupNRFModules(rx, tx):
     
-    
-    # From the API, 1 sets freq to 1Mbps, 2 sets freq to 2Mbps, 250 to 250kbps.
-    rx.data_rate = 2 
-    tx.data_rate = 2
-    
-    #TODO: Look into what channels are the least populated. 
+    rx.setDataRate(RF24_2MBPS) 
+    tx.setDataRate(RF24_2MBPS)
 
+    rx.setAutoAck(True)
+    tx.setAutoAck(True)
 
-   
-    rx.ack = True
-    tx.ack = True
+    rx.payloadSize = 32
+    tx.payloadSize = 32
 
-    rx.payload_length = 32
-    tx.payload_length = 32
+    rx.setCRCLength(RF24_CRC_8)
+    tx.setCRCLength(RF24_CRC_8)
 
-    # From the API, 1 enables CRC using 1 byte (weak), 2 enables CRC using 2 bytes (stronger), 0 disables. 
-    rx.crc = 1
-    tx.crc = 1
+    #Low power because we are using them next to one another! 
+
+    rx.setPALevel(RF24_PA_LOW) 
+    tx.setPALevel(RF24_PA_LOW)
+
     
 def setupIP(isBase):
     ipBase = '20.0.0.1'
@@ -142,8 +144,8 @@ address = [b"1Node", b"2Node"]
 def main():
     parser = argparse.ArgumentParser(description='NRF24L01+')
     parser.add_argument('--isBase', dest='base', type= bool, default=True, help='If this is a base-station, set it to True.') 
-    parser.add_argument('--src', dest='src', type=str, default='Node1', help='NRF24L01+\'s source address')
-    parser.add_argument('--dst', dest='dst', type=str, default='Node2', help='NRF24L01+\'s destination address')
+    parser.add_argument('--src', dest='src', type=str, default='1Node', help='NRF24L01+\'s source address')
+    parser.add_argument('--dst', dest='dst', type=str, default='2Node', help='NRF24L01+\'s destination address')
     parser.add_argument('--count', dest='cnt', type=int, default=10, help='Number of transmissions')
     parser.add_argument('--size', dest='size', type=int, default=32, help='Packet size') 
     parser.add_argument('--txchannel', dest='txchannel', type=int, default=76, help='Tx channel', choices=range(0,125)) 
@@ -162,21 +164,14 @@ def main():
     rx_nrf.begin()
     tx_nrf = RF24(27, 10)
     tx_nrf.begin()
-    #setupNRFModules(rx_nrf, tx_nrf)
+    setupNRFModules(rx_nrf, tx_nrf)
     
-    #nrf = RF24(SPI_BUS1, SPI0['csn'], SPI1['ce_pin'])
-    #These might not be needed, but they seem useful considering their get() blocks until data is available.
-    #setupSingle(nrf)
+   
     tun = setupIP(args.base)
-    #nrf_process = Process(target=rx, kwargs={'nrf':nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
-    #nrf_process = Process(target=tx, kwargs={'nrf':nrf, 'address':bytes(args.dst, 'utf-8'), 'channel': args.txchannel, 'size':args.size})
-    #nrf_process.start()
-    
-    
-    
+   
     rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
     rx_process.start()
-    time.sleep(1)
+    time.sleep(0.01)
 
     tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(args.dst, 'utf-8'), 'channel': args.txchannel, 'size':args.size})
     tx_process.start()
@@ -188,7 +183,7 @@ def main():
             packet = tun.read(tun.mtu)
             print("From TUN: {}".format(packet))
             outgoing.put(packet)
-            print("In main thread, size of the queue is: {}".format(outgoing.qsize()))
+            #print("In main thread, size of the queue is: {}".format(outgoing.qsize()))
 
 
     except KeyboardInterrupt:
@@ -202,7 +197,5 @@ def main():
     
     tx_process.join()
     rx_process.join()
-    
-    #nrf_process.join()
     tun.down()
     print("Threads ended successfully, please stand by.")
