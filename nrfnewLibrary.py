@@ -1,37 +1,12 @@
 import math
 from multiprocessing import Process, Queue
-import sys
 import time
-import struct
-import board
-import digitalio as dio
-import busio
 from pytun import TunTapDevice
 import scapy.all as scape
 import argparse
 from RF24 import RF24, RF24_PA_LOW, RF24_2MBPS,RF24_CRC_8
-import spidev
 
 global outgoing; outgoing = Queue()
-"""
-SPI_BUS0 = spidev.SpiDev()
-SPI_BUS1 = spidev.SpiDev()
-
-SPI0 = {
-    'MOSI':10,#dio.DigitalInOut(board.D10),
-    'MISO':9,#dio.DigitalInOut(board.D9),
-    'clock':11,#dio.DigitalInOut(board.D11),
-    'ce_pin':dio.DigitalInOut(board.D17),
-    'csn':dio.DigitalInOut(board.D8),
-    }
-SPI1 = {
-    'MOSI':20,#dio.DigitalInOut(board.D10),
-    'MISO':19,#dio.DigitalInOut(board.D9),
-    'clock':21,#dio.DigitalInOut(board.D11),
-    'ce_pin':dio.DigitalInOut(board.D27),
-    'csn':dio.DigitalInOut(board.D18), #Not allowed to be on the same PIN as SPI0! No other configuration of this works. 
-    }
-"""
 
 def fragment(packet, fragmentSize):
 
@@ -40,6 +15,8 @@ def fragment(packet, fragmentSize):
     """
     frags = []
     dataRaw = scape.raw(packet)
+    if len(dataRaw) <= fragmentSize:
+        return dataRaw 
     numSteps = math.ceil(len(dataRaw)/fragmentSize)
     print(numSteps)
     for _ in range(numSteps):
@@ -87,10 +64,7 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
             print(test)
             print(type(test))
             packet = bytes(test)
-            print("Before null check: {}".format(test)) #TODO, DELETE THIS.
-            if packet is not None:
-                print("After null check: {}".format(test)) #TODO: Delete this.
-                tun.write(packet)
+            tun.write(packet)
             #packet = incoming.append(nrf.read(size))
             #tun.write(test)
             #print(incoming)
