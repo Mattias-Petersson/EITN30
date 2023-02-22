@@ -9,7 +9,7 @@ import busio
 from pytun import TunTapDevice
 import scapy.all as scape
 import argparse
-from RF24 import RF24, RF24_PA_LOW, RF24_PA_MIN,RF24_2MBPS,RF24_CRC_8
+from RF24 import RF24, RF24_PA_LOW, RF24_PA_MIN, RF24_2MBPS, RF24_CRC_8
 import spidev
 
 global outgoing; outgoing = Queue()
@@ -32,76 +32,58 @@ SPI1 = {
     'csn':dio.DigitalInOut(board.D18), #Not allowed to be on the same PIN as SPI0! No other configuration of this works. 
     }
 """
-
-def fragment(packet, fragmentSize):
-
-    """ Fragments and returns a list of bytes. This is done by finding the number of fragments we want, and then splitting the bytes-like object into chunks of appropriate size. 
-    The input parameter is an IP packet (or any bytes-like object) and the size the method should fragment these into.  
-    """
-    frags = []
-    dataRaw = scape.raw(packet)
-    numSteps = math.ceil(len(dataRaw)/fragmentSize)
-    print(numSteps)
-    for _ in range(numSteps):
-        frags.append(dataRaw[0:32])
-        dataRaw = dataRaw[32:]
-
-    return frags
-
-def defragment(dataList):
-    """ Defragments and returns a packet. The input parameter has to be a fragmented IP packet as a list. (for now)
-    """
-    data = b""
-    return data
  
 #processargs: kwargs={'nrf':tx_nrf, 'address':bytes(args.dst, 'utf-8'), 'queue': incoming, 'channel': args.txchannel, 'size':args.size})
 def tx(nrf: RF24, address, channel, size):
     nrf.openWritingPipe(address)
-    nrf.payloadSize = 32
+    nrf.setAutoAck(false)
     nrf.stopListening()
+    nrf.payloadSize = 32
     print("Init TX on channel {}".format(channel))
-    
-    while True:
-            print("Size of the queue? {}".format(outgoing.qsize()))
-            packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
-            print("TX: {}".format(packet)) #TODO: DELETE. 
-            fragments = fragment(packet, size)
-            for i in fragments:
-                nrf.write(i)
+    nrf.printDetails()
+    count = 0
+    delayList =[]
+    while count<2000:
+        payload = bytearray(32)    
+        start_timer = time.monotonic_ns()  # start timer
+        payload[0:3] =start_timer
+        result = nrf.write(payload)
+        end_timer = time.monotonic_ns()
+        delayList.append(end_timer-start_timer) 
+        count+=1
         
             
 
 #processargs: kwargs={'nrf':rx_nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
 def rx(nrf: RF24, address, tun: TunTapDevice, channel):
     nrf.openReadingPipe(1, address)
-    nrf.startListening() 
+    nrf.setAutoAck(false)
+    rx_nrf.startListening()
     print("Init RX on channel {}".format(channel))
-    incoming = []
-    while True:
+    nrf.printDetails()
+    incoming = 0
+    totalTime = 0
+    count = 0
+    while count<2000:
         hasData, whatPipe = nrf.available_pipe()
-        
+        start_timer = time.monotonic_ns()
         if hasData:
+            start_timer = time.monotonic_ns()
             #size = nrf.getDynamicPayLoadSize()
-            size = nrf.payloadSize
-            print(size)
+            size = nrf.payloadSize #32
+            incoming+=size
             test = nrf.read(size)
-            print(test)
-            print(type(test))
             packet = bytes(test)
-            print("Before null check: {}".format(test)) #TODO, DELETE THIS.
-            if packet is not None:
-                print("After null check: {}".format(test)) #TODO: Delete this.
-                tun.write(packet)
-            #packet = incoming.append(nrf.read(size))
-            #tun.write(test)
-            #print(incoming)
-#        finished = defrag(incoming)
-#        tun.write(finished)
+        end_timer = time.monotonic_ns()
+        totalTime = end_timer-start_timer
+    print("Time elapse in ms : {} ".format(totalTime))
+    print("Incoming bytes: {} ".format(incoming))
+    print("Throughput: "+ incoming/totalTime*1000)
 
 # Troubleshooting tool. Since I am getting radio hardware not found, it is useful to break the program into smaller chunks. 
 def setupSingle(nrf):
     nrf.setDataRate(RF24_2MBPS) #(1) represents 2 Mbps
-    nrf.setAutoAck(True)# for all pipe or nrf.setAutoAck(0,True)
+    nrf.setAutoAck(False)# for all pipe or nrf.setAutoAck(0,True)
     nrf.payloadSize = 32 
     nrf.setCRCLength(RF24_CRC_8) #RF24_CRC_8 or RF24_CRC_16
     nrf.setPALevel(RF24_PA_LOW )
@@ -150,8 +132,8 @@ def main():
     parser.add_argument('--dst', dest='dst', type=str, default='Node2', help='NRF24L01+\'s destination address')
     parser.add_argument('--count', dest='cnt', type=int, default=10, help='Number of transmissions')
     parser.add_argument('--size', dest='size', type=int, default=32, help='Packet size') 
-    parser.add_argument('--txchannel', dest='txchannel', type=int, default=76, help='Tx channel', choices=range(0,125)) 
-    parser.add_argument('--rxchannel', dest='rxchannel', type=int, default=81, help='Rx channel', choices=range(0,125))##WiFi and blutooth channel only up to 80 so channel after 80 could be used
+    parser.add_argument('--txchannel', dest='txchannel', type=int, default=100, help='Tx channel', choices=range(0,125)) #2500Mhz and 2490Mhz
+    parser.add_argument('--rxchannel', dest='rxchannel', type=int, default=90, help='Rx channel', choices=range(0,125))##WiFi and blutooth channel only up to 80 so channel after 80 could be used
 
     args = parser.parse_args()
 
