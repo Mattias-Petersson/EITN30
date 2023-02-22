@@ -63,8 +63,8 @@ def tx(nrf: RF24, address, channel, size):
     while True:
             print("Size of the queue? {}".format(outgoing.qsize()))
             packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
-            print("This should not.")
             print("TX: {}".format(packet)) #TODO: DELETE. 
+            
             fragments = fragment(packet, size)
             for i in fragments:
                 nrf.write(i)
@@ -81,7 +81,7 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
     while True:
         hasData, whatPipe = nrf.available_pipe()
         if hasData:
-            size = nrf.getDynamicPayLoadSize()
+            size = nrf.getDynamicPayloadSize()
             print(size)
             test = nrf.read(size)
             print(test)
@@ -105,7 +105,7 @@ def setupSingle(nrf):
     nrf.setCRCLength(RF24_CRC_8)
     nrf.setPALevel(RF24_PA_LOW)
 
-def setupNRFModules(rx, tx):
+def setupNRFModules(rx: RF24, tx: RF24):
     
     rx.setDataRate(RF24_2MBPS) 
     tx.setDataRate(RF24_2MBPS)
@@ -135,13 +135,13 @@ def setupIP(isBase):
     tun.netmask = '255.255.255.252' # /30
     tun.mtu = 1500
     tun.up()
+    print("TUN interface online, with values \n Address:  {} \n Destination: {} \n Network mask: {}".format(tun.addr, tun.dstaddr, tun.netmask) )
     return tun
 
 
 
 
-address = [b"1Node", b"2Node"]
-def main():
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='NRF24L01+')
     parser.add_argument('--isBase', dest='base', type= bool, default=True, help='If this is a base-station, set it to True.') 
     parser.add_argument('--src', dest='src', type=str, default='1Node', help='NRF24L01+\'s source address')
@@ -156,6 +156,7 @@ def main():
     #With a data rate of 2 Mbps, we need to at least tell the user that the channels should be at least 2Mhz from each other to ensure no cross talk. 
     if abs(args.txchannel - args.rxchannel) < 2:
         print("Do note that having tx and rx channels this close to each other can introduce cross-talk.")
+    # The arguments are assumed to be for the base-station. As such, we change them for the mobile unit.
 
 
     # initialize the nRF24L01 on the spi bus object
@@ -165,15 +166,17 @@ def main():
     tx_nrf = RF24(27, 10)
     tx_nrf.begin()
     setupNRFModules(rx_nrf, tx_nrf)
-    
-   
+    txchannel = args.txchannel if args.base else args.rxchannel
+    rxchannel = args.rxchannel if args.base else args.txchannel
+    src = args.src if args.base else args.dst
+    dst = args.dst if args.base else args.src
     tun = setupIP(args.base)
    
-    rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
+    rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(src, 'utf-8'), 'tun': tun, 'channel': rxchannel})
     rx_process.start()
     time.sleep(0.01)
 
-    tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(args.dst, 'utf-8'), 'channel': args.txchannel, 'size':args.size})
+    tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(dst, 'utf-8'), 'channel': txchannel, 'size':args.size})
     tx_process.start()
 
     ICMPPacket = scape.IP(dst="8.8.8.8")/scape.ICMP() # Merely for testing. Remove later. 
@@ -188,11 +191,10 @@ def main():
 
     except KeyboardInterrupt:
         #Can this interrupt a while true loop? Let's try.
-        print("Hey, do we get here?")
         exit
 
 
-    print("Address:  {} \n Destination: {} \n Network mask: {}".format(tun.addr, tun.dstaddr, tun.netmask) )
+   
 
     
     tx_process.join()
