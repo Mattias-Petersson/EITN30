@@ -18,7 +18,6 @@ def fragment(packet, fragmentSize):
     if len(dataRaw) <= fragmentSize:
         return dataRaw 
     numSteps = math.ceil(len(dataRaw)/fragmentSize)
-    print(numSteps)
     for _ in range(numSteps):
         frags.append(dataRaw[0:32])
         dataRaw = dataRaw[32:]
@@ -43,6 +42,7 @@ def tx(nrf: RF24, address, channel, size):
             print("TX: {}".format(packet)) #TODO: DELETE. 
             
             fragments = fragment(packet, size)
+            print(fragments)
             for i in fragments:
                 nrf.write(i)
         
@@ -59,10 +59,7 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
         hasData, whatPipe = nrf.available_pipe()
         if hasData:
             size = nrf.getDynamicPayloadSize()
-            print(size)
             test = nrf.read(size)
-            print(test)
-            print(type(test))
             packet = bytes(test)
             tun.write(packet)
             #packet = incoming.append(nrf.read(size))
@@ -158,7 +155,6 @@ if __name__ == "__main__":
     try:    
         while True:
             packet = tun.read(tun.mtu)
-            print("From TUN: {}".format(packet))
             outgoing.put(packet)
             #print("In main thread, size of the queue is: {}".format(outgoing.qsize()))
 
