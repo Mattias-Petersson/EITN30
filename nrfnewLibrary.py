@@ -16,11 +16,12 @@ def fragment(packet, fragmentSize):
     frags = []
     dataRaw = scape.raw(packet)
     if len(dataRaw) <= fragmentSize:
-        return dataRaw 
-    numSteps = math.ceil(len(dataRaw)/fragmentSize)
-    for _ in range(numSteps):
-        frags.append(dataRaw[0:32])
-        dataRaw = dataRaw[32:]
+        frags.append(dataRaw)
+    else: 
+        numSteps = math.ceil(len(dataRaw)/fragmentSize)
+        for _ in range(numSteps):
+            frags.append(dataRaw[0:32])
+            dataRaw = dataRaw[32:]
 
     return frags
 
@@ -127,11 +128,9 @@ if __name__ == "__main__":
     #With a data rate of 2 Mbps, we need to at least tell the user that the channels should be at least 2Mhz from each other to ensure no cross talk. 
     if abs(args.txchannel - args.rxchannel) < 2:
         print("Do note that having tx and rx channels this close to each other can introduce cross-talk.")
-    # The arguments are assumed to be for the base-station. As such, we change them for the mobile unit.
 
 
     # initialize the nRF24L01 on the spi bus object
-  
     rx_nrf = RF24(17, 0)
     rx_nrf.begin()
     tx_nrf = RF24(27, 10)
@@ -163,10 +162,6 @@ if __name__ == "__main__":
         #Can this interrupt a while true loop? Let's try.
         exit
 
-
-   
-
-    
     tx_process.join()
     rx_process.join()
     tun.down()
