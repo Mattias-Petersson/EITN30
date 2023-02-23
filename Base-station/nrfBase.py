@@ -2,11 +2,15 @@ import math
 from multiprocessing import Process, Queue
 import time
 from pytun import TunTapDevice
-import scapy.all as scape
+import scapy.all as scapy
 import argparse
 from RF24 import RF24, RF24_PA_LOW, RF24_2MBPS,RF24_CRC_8
 
 global outgoing; outgoing = Queue()
+global rx_process 
+global tx_process
+global rx_nrf
+global tx_nrf
 
 def fragment(packet, fragmentSize):
 
@@ -14,7 +18,7 @@ def fragment(packet, fragmentSize):
     The input parameter is an IP packet (or any bytes-like object) and the size the method should fragment these into.  
     """
     frags = []
-    dataRaw = scape.raw(packet)
+    dataRaw = scapy.raw(packet)
     moreFrag = b'\x01'
     endFrag = b'\x00'
     
@@ -24,6 +28,7 @@ def fragment(packet, fragmentSize):
         numSteps = math.ceil(len(dataRaw)/fragmentSize)
         for _ in range(numSteps):
             temp = moreFrag+dataRaw[0:fragmentSize]
+            print("In fragmentation loop, the fragment is: {}".format(temp))
             frags.append(temp)
             dataRaw = dataRaw[fragmentSize:]
             numSteps-=1
@@ -55,7 +60,7 @@ def tx(nrf: RF24, address, channel, size):
             print("TX: {}".format(packet)) #TODO: DELETE. 
             fragments = fragment(packet, size-1) #prefix 1 byte to fragment 
             for idx, x in enumerate(fragments):
-                print("fragment index: {}".format(idx), x)
+                print("fragment index: {},  ".format(idx), x)
                 nrf.write(x)
      
 
@@ -71,6 +76,7 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
         if hasData:
             packet = readFromNRF(nrf)  
             fragmentHeader = scape.bytes_hex(packet)[0:2] # We know that an IP header has the total length of the packet in its 16th-31th bit. Get this in a readable format.
+            print("Received fragment header removed: {}".format(fragmentHeader))
             packet = packet[2:] #remove fragment Header
             defragmentedPacket+= packet
             if(fragmentHeader == 0):
@@ -79,6 +85,18 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
                 return
             else:
                 print("More packet to come!")
+
+def fullUpLink(isBase:bool,channel:int):
+    print("Enter full-uplink mode")
+    rx_process.join()
+    rx_process = Process(target=tx, kwargs={'nrf':rx_nrf, 'address':bytes(src, 'utf-8'), 'tun': tun, 'channel': channel})
+    rx_process.start()
+
+def fullDuplex(isBase:bool,channel:int):
+    print("Enter full-duplex mode")
+
+def fullDownLink(isBase:bool,channel:int):
+    print("Enter full-downlink mode")  
 
 
 # Troubleshooting tool. Since I am getting radio hardware not found, it is useful to break the program into smaller chunks. 
@@ -161,7 +179,7 @@ if __name__ == "__main__":
     tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(dst, 'utf-8'), 'channel': txchannel, 'size':args.size})
     tx_process.start()
 
-    ICMPPacket = scape.IP(dst="8.8.8.8")/scape.ICMP() # Merely for testing. Remove later. 
+
     
     try:    
         while True:
