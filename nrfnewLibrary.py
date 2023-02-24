@@ -87,11 +87,12 @@ def setupNRFModules(rx: RF24, tx: RF24, args):
     tx.setPALevel(RF24_PA_LOW)
 
     # Setting up the NRF modules in this method as well. 
-
+"""
     if(args.base):
         return args.txchannel, args.rxchannel, args.src, args.dst
     
     return args.rxchannel, args.txchannel, args.dst, args.src
+"""
 def setupIP(isBase):
     ipBase = '20.0.0.1'
     ipMobile = '20.0.0.2'
@@ -129,7 +130,10 @@ if __name__ == "__main__":
     tx_nrf = RF24(27, 10)
     tx_nrf.begin()
 
-    tx, rx, src, dst = setupNRFModules(rx_nrf, tx_nrf, args)
+    txchannel = args.txchannel if args.base else args.rxchannel
+    rxchannel = args.rxchannel if args.base else args.txchannel
+    src = args.src if args.base else args.dst
+    dst = args.dst if args.base else args.src
     tun = setupIP(args.base)
    
     rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(src, 'utf-8'), 'tun': tun, 'channel': rx})
