@@ -36,7 +36,7 @@ SPI1 = {
 #processargs: kwargs={'nrf':tx_nrf, 'address':bytes(args.dst, 'utf-8'), 'queue': incoming, 'channel': args.txchannel, 'size':args.size})
 def tx(nrf: RF24, address, channel, size):
     nrf.openWritingPipe(address)
-    nrf.setAutoAck(false)
+    nrf.setAutoAck(True)
     nrf.stopListening()
     nrf.payloadSize = 32
     print("Init TX on channel {}".format(channel))
@@ -46,27 +46,28 @@ def tx(nrf: RF24, address, channel, size):
     while count<2000:
         payload = bytearray(32)    
         start_timer = time.monotonic_ns()  # start timer
-        payload[0:3] =start_timer
+        payload[0:7] =start_timer
         result = nrf.write(payload)
         end_timer = time.monotonic_ns()
+        print("Transmit :{} p".format(result))
         delayList.append(end_timer-start_timer) 
         count+=1
-        
+    print(delayList)    
             
 
 #processargs: kwargs={'nrf':rx_nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
 def rx(nrf: RF24, address, tun: TunTapDevice, channel):
     nrf.openReadingPipe(1, address)
-    nrf.setAutoAck(false)
+    nrf.setAutoAck(True)
     rx_nrf.startListening()
     print("Init RX on channel {}".format(channel))
     nrf.printDetails()
     incoming = 0
-    totalTime = 0
+    totalTime = float(0.0)
     count = 0
-    while count<2000:
+    start_timer = time.monotonic_ns()
+    while totalTime<2000000:
         hasData, whatPipe = nrf.available_pipe()
-        start_timer = time.monotonic_ns()
         if hasData:
             start_timer = time.monotonic_ns()
             #size = nrf.getDynamicPayLoadSize()
@@ -90,15 +91,10 @@ def setupSingle(nrf):
 
 def setupNRFModules(rx, tx):
     
-    
     # From the API, 1 sets freq to 1Mbps, 2 sets freq to 2Mbps, 250 to 250kbps.
     rx.setDataRate(RF24_2MBPS)  
     tx.setDataRate(RF24_2MBPS)
-    
-    #TODO: Look into what channels are the least populated. 
 
-
-   
     rx.setAutoAck(True) # enable autoAck for pipeline 0 This number should be in range [0, 5]
     tx.setAutoAck(True) 
 
@@ -124,16 +120,15 @@ def setupIP(isBase):
 
 
 
-address = [b"1Node", b"2Node"]
-def main():
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='NRF24L01+')
     parser.add_argument('--isBase', dest='base', type= bool, default=True, help='If this is a base-station, set it to True.') 
-    parser.add_argument('--src', dest='src', type=str, default='Node1', help='NRF24L01+\'s source address')
-    parser.add_argument('--dst', dest='dst', type=str, default='Node2', help='NRF24L01+\'s destination address')
+    parser.add_argument('--src', dest='src', type=str, default='1Node', help='NRF24L01+\'s source address')
+    parser.add_argument('--dst', dest='dst', type=str, default='2Node', help='NRF24L01+\'s destination address')
     parser.add_argument('--count', dest='cnt', type=int, default=10, help='Number of transmissions')
     parser.add_argument('--size', dest='size', type=int, default=32, help='Packet size') 
-    parser.add_argument('--txchannel', dest='txchannel', type=int, default=100, help='Tx channel', choices=range(0,125)) #2500Mhz and 2490Mhz
-    parser.add_argument('--rxchannel', dest='rxchannel', type=int, default=90, help='Rx channel', choices=range(0,125))##WiFi and blutooth channel only up to 80 so channel after 80 could be used
+    parser.add_argument('--txchannel', dest='txchannel', type=int, default=76, help='Tx channel', choices=range(0,125)) 
+    parser.add_argument('--rxchannel', dest='rxchannel', type=int, default=81, help='Rx channel', choices=range(0,125))
 
     args = parser.parse_args()
 
@@ -143,54 +138,34 @@ def main():
 
 
     # initialize the nRF24L01 on the spi bus object
-  
     rx_nrf = RF24(17, 0)
-    rx_nrf.begin() # startListening() 
-    
+    rx_nrf.begin()
     tx_nrf = RF24(27, 10)
-    tx_nrf.begin() # stopListening()
-    
-    #setupNRFModules(rx_nrf, tx_nrf)
-    
-    #nrf = RF24(SPI_BUS1, SPI0['csn'], SPI1['ce_pin'])
-    #These might not be needed, but they seem useful considering their get() blocks until data is available.
-    #setupSingle(nrf)
+    tx_nrf.begin()
+    setupNRFModules(rx_nrf, tx_nrf)
+    txchannel = args.txchannel if args.base else args.rxchannel
+    rxchannel = args.rxchannel if args.base else args.txchannel
+    src = args.src if args.base else args.dst
+    dst = args.dst if args.base else args.src
     tun = setupIP(args.base)
-    #nrf_process = Process(target=rx, kwargs={'nrf':nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
-    #nrf_process = Process(target=tx, kwargs={'nrf':nrf, 'address':bytes(args.dst, 'utf-8'), 'channel': args.txchannel, 'size':args.size})
-    #nrf_process.start()
-    
-    
-    
-    rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
+   
+    rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(src, 'utf-8'), 'tun': tun, 'channel': rxchannel})
     rx_process.start()
-    
+    time.sleep(0.01)
 
-    tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(args.dst, 'utf-8'), 'channel': args.txchannel, 'size':args.size})
+    tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(dst, 'utf-8'), 'channel': txchannel, 'size':args.size})
     tx_process.start()
-
-    ICMPPacket = scape.IP(dst="8.8.8.8")/scape.ICMP() # Merely for testing. Remove later. 
-    
+   
     try:    
         while True:
             packet = tun.read(tun.mtu)
-            print("From TUN: {}".format(packet))
             outgoing.put(packet)
-            print("In main thread, size of the queue is: {}".format(outgoing.qsize()))
-
 
     except KeyboardInterrupt:
-        #Can this interrupt a while true loop? Let's try.
-        print("Hey, do we get here?")
+        print("KeyboardInterrupt exit!")
         exit
 
-
-    print("Address:  {} \n Destination: {} \n Network mask: {}".format(tun.addr, tun.dstaddr, tun.netmask) )
-
-    
     tx_process.join()
     rx_process.join()
-    
-    #nrf_process.join()
     tun.down()
     print("Threads ended successfully, please stand by.")

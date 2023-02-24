@@ -2,21 +2,11 @@ import math
 from multiprocessing import Process, Queue
 import time
 from pytun import TunTapDevice
-import scapy.all as scapy
-import scapy.all as scapy
+import scapy.all as scape
 import argparse
-from RF24 import RF24, RF24_PA_LOW, RF24_2MBPS,RF24_CRC_8
 from RF24 import RF24, RF24_PA_LOW, RF24_2MBPS,RF24_CRC_8
 
 global outgoing; outgoing = Queue()
-global rx_process 
-global tx_process
-global rx_nrf
-global tx_nrf
-global rx_process 
-global tx_process
-global rx_nrf
-global tx_nrf
 
 def fragment(packet, fragmentSize):
 
@@ -24,34 +14,15 @@ def fragment(packet, fragmentSize):
     The input parameter is an IP packet (or any bytes-like object) and the size the method should fragment these into.  
     """
     frags = []
-    dataRaw = scapy.raw(packet)
-    hexTotalPacketLength = scapy.bytes_hex(packet)[4:8] # We know that an IP header has the total length of the packet in its 16th-31th bit. Get this in a readable format.
-    packageLength= int(hexTotalPacketLength, 16)
-    srcIP = dataRaw[11:15]
-    dstIP = dataRaw[15:19]
-    if not checkIP(srcIP) or not checkIP(srcIP) : return frags
-    prefix = b""
-    print("Begin fragment:{} ".format(packet))
-    
+    dataRaw = scape.raw(packet)
     if len(dataRaw) <= fragmentSize:
-        #size less than 31 bytes add 1byte geader to package
-        prefix = bytes(packageLength)
-        frags.append(prefix+dataRaw)
+        frags.append(dataRaw)
     else: 
         numSteps = math.ceil(len(dataRaw)/fragmentSize)
-        for i in range(numSteps):
-            prefix=bytes(fragmentSize)
-            temp = prefix+dataRaw[0:fragmentSize]
-            print("In fragmentation loop {}, the fragment is: {}".format(i,temp))
-            frags.append(temp)
-            dataRaw = dataRaw[fragmentSize:]
-            packageLength-=fragmentSize+1
-            numSteps-=1
-            if(numSteps ==1):break 
-        prefix = bytes(packageLength)     
-        last = prefix +dataRaw[0:packageLength-1]
-        frags.append(last)
-        print("End of frag")
+        for _ in range(numSteps):
+            frags.append(dataRaw[0:32])
+            dataRaw = dataRaw[32:]
+
     return frags
 
 def defragment(dataList):
@@ -59,82 +30,44 @@ def defragment(dataList):
     """
     data = b""
     return data
-
-def readFromNRF(nrf: RF24):
-    size = nrf.getDynamicPayloadSize()
-    temp = nrf.read(size)
-    print("Read from NRF {}".format(temp))
-    return bytes(temp)
-
-
-def readFromNRF(nrf: RF24):
-    size = nrf.getDynamicPayloadSize()
-    temp = nrf.read(size)
-    print("Read from NRF {}".format(temp))
-    return bytes(temp)
-
+ 
 #processargs: kwargs={'nrf':tx_nrf, 'address':bytes(args.dst, 'utf-8'), 'queue': incoming, 'channel': args.txchannel, 'size':args.size})
 def tx(nrf: RF24, address, channel, size):
     nrf.openWritingPipe(address)
     nrf.stopListening()
     print("Init TX on channel {}".format(channel))
+    nrf.printDetails()
     while True:
+            print("Size of the queue? {}".format(outgoing.qsize()))
             packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
-            #if scapy.packet.haslayer(IP)==1
             print("TX: {}".format(packet)) #TODO: DELETE. 
-            fragments = fragment(packet, size-2) #prefix 1 byte to fragment 
-            for idx, x in enumerate(fragments):  
-                print("fragment index: {},  ".format(idx),x)
-                nrf.write(x)
-     
+            
+            fragments = fragment(packet, size)
+            print(fragments)
+            for i in fragments:
+                nrf.write(i)
+        
+            
 
 #processargs: kwargs={'nrf':rx_nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
 def rx(nrf: RF24, address, tun: TunTapDevice, channel):
     nrf.openReadingPipe(1, address)
     nrf.startListening()
-    print("Init RX on channel {} with details:".format(channel))
-    defragmentedPacket = b""
-    counter = 0
-    nrf.startListening()
-    print("Init RX on channel {} with details:".format(channel))
-    defragmentedPacket = b""
-    counter = 0
+    print("Init RX on channel {}".format(channel))
+    nrf.printDetails()
+    incoming = []
     while True:
         hasData, whatPipe = nrf.available_pipe()
         if hasData:
-            print("Receive data")
-            packet = readFromNRF(nrf)  
-            fragmentHeader = int.from_bytes(packet[0:1],"big") # We know that an IP header has the total length of the packet in its 16th-31th bit. Get this in a readable format.
-            print("Received fragment header removed: {}".format(fragmentHeader))
-            packet = packet[1:] #remove fragment Header
-            defragmentedPacket+= packet
-            if(fragmentHeader <= 32):
-                print("Hey, short packet!")
-                print("length of defragmented package: {}".format(fragmentHeader))
-                defragmentedPacket=defragmentedPacket[0:fragmentHeader-1] 
-                tun.write(defragmentedPacket)
-                return
-            else:
-                print("More packet to come!")
-                print(defragmentedPacket)
-def checkIP(ip:bytes):
-    if ip == b"20.0.0.1" or ip== b"20.0.0.2":
-        return True
-    else:
-        return False
-
-def fullUpLink(isBase:bool,channel:int):
-    print("Enter full-uplink mode")
-    rx_process.join()
-    rx_process = Process(target=tx, kwargs={'nrf':rx_nrf, 'address':bytes(src, 'utf-8'), 'tun': tun, 'channel': channel})
-    rx_process.start()
-
-def fullDuplex(isBase:bool,channel:int):
-    print("Enter full-duplex mode")
-
-def fullDownLink(isBase:bool,channel:int):
-    print("Enter full-downlink mode")  
-
+            size = nrf.getDynamicPayloadSize()
+            test = nrf.read(size)
+            packet = bytes(test)
+            tun.write(packet)
+            #packet = incoming.append(nrf.read(size))
+            #tun.write(test)
+            #print(incoming)
+#        finished = defrag(incoming)
+#        tun.write(finished)
 
 # Troubleshooting tool. Since I am getting radio hardware not found, it is useful to break the program into smaller chunks. 
 def setupSingle(nrf):
@@ -145,20 +78,9 @@ def setupSingle(nrf):
     nrf.setPALevel(RF24_PA_LOW)
 
 def setupNRFModules(rx: RF24, tx: RF24):
-    nrf.setDataRate(RF24_2MBPS) 
-    nrf.setAutoAck(True)
-    nrf.payloadSize = 32
-    nrf.setCRCLength(RF24_CRC_8)
-    nrf.setPALevel(RF24_PA_LOW)
-
-def setupNRFModules(rx: RF24, tx: RF24):
     
     rx.setDataRate(RF24_2MBPS) 
-    rx.setDataRate(RF24_2MBPS) 
     tx.setDataRate(RF24_2MBPS)
-
-    rx.setAutoAck(True)
-    tx.setAutoAck(True)
 
     rx.setAutoAck(True)
     tx.setAutoAck(True)
@@ -168,13 +90,6 @@ def setupNRFModules(rx: RF24, tx: RF24):
 
     rx.setCRCLength(RF24_CRC_8)
     tx.setCRCLength(RF24_CRC_8)
-
-    #Low power because we are using them next to one another! 
-
-    rx.setPALevel(RF24_PA_LOW) 
-    tx.setPALevel(RF24_PA_LOW)
-
-    
 
     #Low power because we are using them next to one another! 
 
@@ -193,24 +108,19 @@ def setupIP(isBase):
     tun.mtu = 1500
     tun.up()
     print("TUN interface online, with values \n Address:  {} \n Destination: {} \n Network mask: {}".format(tun.addr, tun.dstaddr, tun.netmask) )
-    print("TUN interface online, with values \n Address:  {} \n Destination: {} \n Network mask: {}".format(tun.addr, tun.dstaddr, tun.netmask) )
     return tun
 
 
 
 
 if __name__ == "__main__":
-if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='NRF24L01+')
     parser.add_argument('--isBase', dest='base', type= bool, default=True, help='If this is a base-station, set it to True.') 
-    parser.add_argument('--src', dest='src', type=str, default='1Node', help='NRF24L01+\'s source address')
-    parser.add_argument('--dst', dest='dst', type=str, default='2Node', help='NRF24L01+\'s destination address')
     parser.add_argument('--src', dest='src', type=str, default='1Node', help='NRF24L01+\'s source address')
     parser.add_argument('--dst', dest='dst', type=str, default='2Node', help='NRF24L01+\'s destination address')
     parser.add_argument('--count', dest='cnt', type=int, default=10, help='Number of transmissions')
     parser.add_argument('--size', dest='size', type=int, default=32, help='Packet size') 
     parser.add_argument('--txchannel', dest='txchannel', type=int, default=76, help='Tx channel', choices=range(0,125)) 
-    parser.add_argument('--rxchannel', dest='rxchannel', type=int, default=81, help='Rx channel', choices=range(0,125))
     parser.add_argument('--rxchannel', dest='rxchannel', type=int, default=81, help='Rx channel', choices=range(0,125))
 
     args = parser.parse_args()
@@ -223,14 +133,7 @@ if __name__ == "__main__":
     # initialize the nRF24L01 on the spi bus object
     rx_nrf = RF24(17, 0)
     rx_nrf.begin()
-    rx_nrf.begin()
     tx_nrf = RF24(27, 10)
-    tx_nrf.begin()
-    setupNRFModules(rx_nrf, tx_nrf)
-    txchannel = args.txchannel if args.base else args.rxchannel
-    rxchannel = args.rxchannel if args.base else args.txchannel
-    src = args.src if args.base else args.dst
-    dst = args.dst if args.base else args.src
     tx_nrf.begin()
     setupNRFModules(rx_nrf, tx_nrf)
     txchannel = args.txchannel if args.base else args.rxchannel
@@ -240,25 +143,18 @@ if __name__ == "__main__":
     tun = setupIP(args.base)
    
     rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(src, 'utf-8'), 'tun': tun, 'channel': rxchannel})
-   
-    rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(src, 'utf-8'), 'tun': tun, 'channel': rxchannel})
     rx_process.start()
-    time.sleep(0.01)
-
-    tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(dst, 'utf-8'), 'channel': txchannel, 'size':args.size})
     time.sleep(0.01)
 
     tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(dst, 'utf-8'), 'channel': txchannel, 'size':args.size})
     tx_process.start()
 
-
-
+    ICMPPacket = scape.IP(dst="8.8.8.8")/scape.ICMP() # Merely for testing. Remove later. 
     
     try:    
         while True:
             packet = tun.read(tun.mtu)
             outgoing.put(packet)
-            #print("In main thread, size of the queue is: {}".format(outgoing.qsize()))
             #print("In main thread, size of the queue is: {}".format(outgoing.qsize()))
 
 
