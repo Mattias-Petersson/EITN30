@@ -31,6 +31,7 @@ def defragment(dataList):
     data = b""
     return data
  
+#processargs: kwargs={'nrf':tx_nrf, 'address':bytes(args.dst, 'utf-8'), 'queue': incoming, 'channel': args.txchannel, 'size':args.size})
 def tx(nrf: RF24, address, channel, size):
     nrf.openWritingPipe(address)
     nrf.stopListening()
@@ -40,12 +41,15 @@ def tx(nrf: RF24, address, channel, size):
             print("Size of the queue? {}".format(outgoing.qsize()))
             packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
             print("TX: {}".format(packet)) #TODO: DELETE. 
+            
             fragments = fragment(packet, size)
             print(fragments)
             for i in fragments:
                 nrf.write(i)
         
             
+
+#processargs: kwargs={'nrf':rx_nrf, 'address':bytes(args.src, 'utf-8'), 'tun': tun, 'channel': args.rxchannel})
 def rx(nrf: RF24, address, tun: TunTapDevice, channel):
     nrf.openReadingPipe(1, address)
     nrf.startListening()
@@ -64,6 +68,14 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
             #print(incoming)
 #        finished = defrag(incoming)
 #        tun.write(finished)
+
+# Troubleshooting tool. Since I am getting radio hardware not found, it is useful to break the program into smaller chunks. 
+def setupSingle(nrf):
+    nrf.setDataRate(RF24_2MBPS) 
+    nrf.setAutoAck(True)
+    nrf.payloadSize = 32
+    nrf.setCRCLength(RF24_CRC_8)
+    nrf.setPALevel(RF24_PA_LOW)
 
 def setupNRFModules(rx: RF24, tx: RF24):
     
@@ -84,12 +96,7 @@ def setupNRFModules(rx: RF24, tx: RF24):
     rx.setPALevel(RF24_PA_LOW) 
     tx.setPALevel(RF24_PA_LOW)
 
-    # Setting up the NRF modules in this method as well. 
-
-    if(args.base):
-        return args.txchannel, args.rxchannel, args.src, args.dst
     
-    return args.rxchannel, args.txchannel, args.dst, args.src
 def setupIP(isBase):
     ipBase = '20.0.0.1'
     ipMobile = '20.0.0.2'
@@ -107,10 +114,11 @@ def setupIP(isBase):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='NRF24L01+. Please note that you should use the same src/dst for the base and the mobile unit, put the isBase to False and let the program handle the RX/TX pair.')
+    parser = argparse.ArgumentParser(description='NRF24L01+')
     parser.add_argument('--isBase', dest='base', type= bool, default=True, help='If this is a base-station, set it to True.') 
-    parser.add_argument('--src', dest='src', type=str, default='1Node', help='NRF24L01+\'s source address (Base)')
-    parser.add_argument('--dst', dest='dst', type=str, default='2Node', help='NRF24L01+\'s destination address (Base)')
+    parser.add_argument('--src', dest='src', type=str, default='1Node', help='NRF24L01+\'s source address')
+    parser.add_argument('--dst', dest='dst', type=str, default='2Node', help='NRF24L01+\'s destination address')
+    parser.add_argument('--count', dest='cnt', type=int, default=10, help='Number of transmissions')
     parser.add_argument('--size', dest='size', type=int, default=32, help='Packet size') 
     parser.add_argument('--txchannel', dest='txchannel', type=int, default=76, help='Tx channel', choices=range(0,125)) 
     parser.add_argument('--rxchannel', dest='rxchannel', type=int, default=81, help='Rx channel', choices=range(0,125))
@@ -127,15 +135,18 @@ if __name__ == "__main__":
     rx_nrf.begin()
     tx_nrf = RF24(27, 10)
     tx_nrf.begin()
-
-    tx, rx, src, dst = setupNRFModules(rx_nrf, tx_nrf, args)
+    setupNRFModules(rx_nrf, tx_nrf)
+    txchannel = args.txchannel if args.base else args.rxchannel
+    rxchannel = args.rxchannel if args.base else args.txchannel
+    src = args.src if args.base else args.dst
+    dst = args.dst if args.base else args.src
     tun = setupIP(args.base)
    
-    rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(src, 'utf-8'), 'tun': tun, 'channel': rx})
+    rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(src, 'utf-8'), 'tun': tun, 'channel': rxchannel})
     rx_process.start()
     time.sleep(0.01)
 
-    tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(dst, 'utf-8'), 'channel': tx, 'size':args.size})
+    tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(dst, 'utf-8'), 'channel': txchannel, 'size':args.size})
     tx_process.start()
 
     ICMPPacket = scape.IP(dst="8.8.8.8")/scape.ICMP() # Merely for testing. Remove later. 
@@ -148,13 +159,10 @@ if __name__ == "__main__":
 
 
     except KeyboardInterrupt:
-        print("Main thread no longer listening on the TUN interface. ")
+        #Can this interrupt a while true loop? Let's try.
+        exit
 
     tx_process.join()
     rx_process.join()
-    # Setting the radios to stop listening seems to be best practice. 
-    rx_nrf.stopListening()  
-    tx_nrf.stopListening()
-
     tun.down()
-    print("Threads ended, radios stopped listening, TUN interface down.")
+    print("Threads ended successfully, please stand by.")
