@@ -41,9 +41,8 @@ def tx(nrf: RF24, address, channel, size):
             packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
             #print("TX: {}".format(packet)) #TODO: DELETE. 
             fragments = fragment(packet, size)
-            #print(fragments)
             for i in fragments:
-                print(scape.hex_bytes(i))
+                print("Fragment in TX: {}".format(i))
                 nrf.write(i)
         
             
@@ -57,9 +56,9 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
         hasData, whatPipe = nrf.available_pipe()
         if hasData:
             size = nrf.getDynamicPayloadSize()
-            test = nrf.read(size)
-            packet = bytes(test)
-            print(scape.hex_bytes(packet))
+            tmp = nrf.read(size)
+            packet = bytes(tmp)
+            print("Fragment received on RX: {}".format(packet))
             tun.write(packet)
             #packet = incoming.append(nrf.read(size))
             #tun.write(test)
@@ -85,7 +84,6 @@ def setupNRFModules(rx: RF24, tx: RF24, args):
 
     rx.setPALevel(RF24_PA_LOW) 
     tx.setPALevel(RF24_PA_LOW)
-
     # Setting up the NRF modules in this method as well. 
 """
     if(args.base):
