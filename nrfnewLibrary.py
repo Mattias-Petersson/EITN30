@@ -6,7 +6,7 @@ import scapy.all as scape
 import argparse
 from RF24 import RF24, RF24_PA_LOW, RF24_2MBPS,RF24_CRC_8
 
-global outgoing; outgoing = Queue()
+global outgoing; outgoing = Queue() 
 
 def fragment(packet, fragmentSize):
 
@@ -14,7 +14,7 @@ def fragment(packet, fragmentSize):
     The input parameter is an IP packet (or any bytes-like object) and the size the method should fragment these into.  
     """
     frags = []
-    dataRaw = scape.raw(packet)
+    dataRaw = bytes(packet)
     if len(dataRaw) <= fragmentSize:
         frags.append(dataRaw)
     else: 
@@ -39,10 +39,11 @@ def tx(nrf: RF24, address, channel, size):
     while True:
             print("Size of the queue? {}".format(outgoing.qsize()))
             packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
-            print("TX: {}".format(packet)) #TODO: DELETE. 
+            #print("TX: {}".format(packet)) #TODO: DELETE. 
             fragments = fragment(packet, size)
-            print(fragments)
+            #print(fragments)
             for i in fragments:
+                print(scape.hex_bytes(i))
                 nrf.write(i)
         
             
@@ -58,6 +59,7 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
             size = nrf.getDynamicPayloadSize()
             test = nrf.read(size)
             packet = bytes(test)
+            print(scape.hex_bytes(packet))
             tun.write(packet)
             #packet = incoming.append(nrf.read(size))
             #tun.write(test)
@@ -65,7 +67,7 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
 #        finished = defrag(incoming)
 #        tun.write(finished)
 
-def setupNRFModules(rx: RF24, tx: RF24):
+def setupNRFModules(rx: RF24, tx: RF24, args):
     
     rx.setDataRate(RF24_2MBPS) 
     tx.setDataRate(RF24_2MBPS)
@@ -120,7 +122,6 @@ if __name__ == "__main__":
     #With a data rate of 2 Mbps, we need to at least tell the user that the channels should be at least 2Mhz from each other to ensure no cross talk. 
     if abs(args.txchannel - args.rxchannel) < 2:
         print("Do note that having tx and rx channels this close to each other can introduce cross-talk.")
-
 
     # initialize the nRF24L01 on the spi bus object
     rx_nrf = RF24(17, 0)
