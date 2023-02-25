@@ -53,9 +53,11 @@ def defragment(byteList):
     """ Defragments and returns a packet. The input parameter has to be a fragmented IP packet as a list. (for now)
     """
     header = byteList[0:1]
+    package = byteList[1:]
+    print("Defragmented package: {}".format(package))
     if(header == b'\x01'):
-        return True, byteList[1:]
-    return False, byteList[1:]
+        return True, package
+    return False, package
 
 def readFromNRF(nrf: RF24):
     size = nrf.getDynamicPayloadSize()
@@ -77,9 +79,8 @@ def tx(nrf: RF24, address, channel, size):
     print("Init TX on channel {}".format(channel))
     while True:
             packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
-            #if scapy.packet.haslayer(IP)==1
             print("TX: {}".format(packet)) #TODO: DELETE. 
-            fragments = fragment(packet, size-2) #prefix 1 byte to fragment 
+            fragments = fragment(packet, size-2) #prefix 1 byte to fragment the fragment will be 32 bytes
             for idx, x in enumerate(fragments):  
                 print("fragment index: {},  ".format(idx),x)
                 nrf.write(x)
@@ -89,9 +90,8 @@ def tx(nrf: RF24, address, channel, size):
 def rx(nrf: RF24, address, tun: TunTapDevice, channel):
     nrf.openReadingPipe(1, address)
     nrf.startListening()
-    print("Init RX on channel {} with details:".format(channel))
+    print("Init RX on channel {} :".format(channel))
     defragmentedPacket = b""
-
     while True:
         hasData, whatPipe = nrf.available_pipe()
         moreFrag = False
@@ -107,7 +107,9 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
             else:
                 defragmentedPacket +=fragment
                 tun.write(defragmentedPacket)
+                print("Write to tun interface") 
                 defragmentedPacket = b"" #clear memory
+                moreFrag = False #clear memory
 
 
 
