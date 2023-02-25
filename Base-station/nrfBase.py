@@ -13,52 +13,49 @@ global rx_process
 global tx_process
 global rx_nrf
 global tx_nrf
-global rx_process 
-global tx_process
-global rx_nrf
-global tx_nrf
+
 
 def fragment(packet, fragmentSize):
 
     """ Fragments and returns a list of bytes. This is done by finding the number of fragments we want, and then splitting the bytes-like object into chunks of appropriate size. 
     The input parameter is an IP packet (or any bytes-like object) and the size the method should fragment these into.  
     """
+    # fragmentSize == 30
     frags = []
     dataRaw = scapy.raw(packet)
-    hexTotalPacketLength = scapy.bytes_hex(packet)[4:8] # We know that an IP header has the total length of the packet in its 16th-31th bit. Get this in a readable format.
-    packageLength= int(hexTotalPacketLength, 16)
-    srcIP = dataRaw[11:15]
-    dstIP = dataRaw[15:19]
-    if not checkIP(srcIP) or not checkIP(srcIP) : return frags
-    prefix = b""
+    moreFrag = b'\x01'
+    endFrag =b'\x00'
+    # hexTotalPacketLength = scapy.bytes_hex(packet)[4:8] # We know that an IP header has the total length of the packet in its 16th-31th bit. Get this in a readable format.
+    
+    #prefix = int.to_bytes(1, "big") # unsure about the big or little endian convert into 1 byte
     print("Begin fragment:{} ".format(packet))
     
-    if len(dataRaw) <= fragmentSize:
+    if len(dataRaw) <= fragmentSize+1:
         #size less than 31 bytes add 1byte geader to package
-        prefix = bytes(packageLength)
-        frags.append(prefix+dataRaw)
+        print("Do not need to fragment")
+        frags.append(endFrag+dataRaw)
     else: 
         numSteps = math.ceil(len(dataRaw)/fragmentSize)
         for i in range(numSteps):
-            prefix=bytes(fragmentSize)
-            temp = prefix+dataRaw[0:fragmentSize]
+            temp = moreFrag+dataRaw[0:fragmentSize]
             print("In fragmentation loop {}, the fragment is: {}".format(i,temp))
             frags.append(temp)
             dataRaw = dataRaw[fragmentSize:]
-            packageLength-=fragmentSize+1
             numSteps-=1
-            if(numSteps ==1):break 
-        prefix = bytes(packageLength)     
-        last = prefix +dataRaw[0:packageLength-1]
+            if(numSteps ==1):break       
+        last = endFrag +dataRaw
+        print("The last fragment length: {}".format(len(dataRaw)))
         frags.append(last)
         print("End of frag")
     return frags
 
-def defragment(dataList):
+def defragment(byteList):
     """ Defragments and returns a packet. The input parameter has to be a fragmented IP packet as a list. (for now)
     """
-    data = b""
-    return data
+    header = byteList[0:1]
+    if(header == b'\x01'):
+        return True, byteList[1:]
+    return False, byteList[1:]
 
 def readFromNRF(nrf: RF24):
     size = nrf.getDynamicPayloadSize()
@@ -94,34 +91,25 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
     nrf.startListening()
     print("Init RX on channel {} with details:".format(channel))
     defragmentedPacket = b""
-    counter = 0
-    nrf.startListening()
-    print("Init RX on channel {} with details:".format(channel))
-    defragmentedPacket = b""
-    counter = 0
+
     while True:
         hasData, whatPipe = nrf.available_pipe()
+        moreFrag = False
         if hasData:
-            print("Receive data")
-            packet = readFromNRF(nrf)  
-            fragmentHeader = int.from_bytes(packet[0:1],"big") # We know that an IP header has the total length of the packet in its 16th-31th bit. Get this in a readable format.
-            print("Received fragment header removed: {}".format(fragmentHeader))
-            packet = packet[1:] #remove fragment Header
-            defragmentedPacket+= packet
-            if(fragmentHeader <= 32):
-                print("Hey, short packet!")
-                print("length of defragmented package: {}".format(fragmentHeader))
-                defragmentedPacket=defragmentedPacket[0:fragmentHeader-1] 
-                tun.write(defragmentedPacket)
-                return
+            size = nrf.getDynamicPayloadSize()
+            tmp = nrf.read(size)
+            packet = bytes(tmp)
+            print("Fragment received on RX: {}".format(packet))
+            moreFrag, fragment = defragment(packet)
+            if(moreFrag == True):
+                print("Waiting for more fragments")
+                defragmentedPacket +=fragment
             else:
-                print("More packet to come!")
-                print(defragmentedPacket)
-def checkIP(ip:bytes):
-    if ip == b"20.0.0.1" or ip== b"20.0.0.2":
-        return True
-    else:
-        return False
+                defragmentedPacket +=fragment
+                tun.write(defragmentedPacket)
+                defragmentedPacket = b"" #clear memory
+
+
 
 def fullUpLink(isBase:bool,channel:int):
     print("Enter full-uplink mode")
@@ -144,12 +132,7 @@ def setupSingle(nrf):
     nrf.setCRCLength(RF24_CRC_8)
     nrf.setPALevel(RF24_PA_LOW)
 
-def setupNRFModules(rx: RF24, tx: RF24):
-    nrf.setDataRate(RF24_2MBPS) 
-    nrf.setAutoAck(True)
-    nrf.payloadSize = 32
-    nrf.setCRCLength(RF24_CRC_8)
-    nrf.setPALevel(RF24_PA_LOW)
+
 
 def setupNRFModules(rx: RF24, tx: RF24):
     
@@ -200,7 +183,6 @@ def setupIP(isBase):
 
 
 if __name__ == "__main__":
-if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='NRF24L01+')
     parser.add_argument('--isBase', dest='base', type= bool, default=True, help='If this is a base-station, set it to True.') 
     parser.add_argument('--src', dest='src', type=str, default='1Node', help='NRF24L01+\'s source address')
@@ -223,14 +205,7 @@ if __name__ == "__main__":
     # initialize the nRF24L01 on the spi bus object
     rx_nrf = RF24(17, 0)
     rx_nrf.begin()
-    rx_nrf.begin()
     tx_nrf = RF24(27, 10)
-    tx_nrf.begin()
-    setupNRFModules(rx_nrf, tx_nrf)
-    txchannel = args.txchannel if args.base else args.rxchannel
-    rxchannel = args.rxchannel if args.base else args.txchannel
-    src = args.src if args.base else args.dst
-    dst = args.dst if args.base else args.src
     tx_nrf.begin()
     setupNRFModules(rx_nrf, tx_nrf)
     txchannel = args.txchannel if args.base else args.rxchannel
@@ -240,25 +215,16 @@ if __name__ == "__main__":
     tun = setupIP(args.base)
    
     rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(src, 'utf-8'), 'tun': tun, 'channel': rxchannel})
-   
-    rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(src, 'utf-8'), 'tun': tun, 'channel': rxchannel})
     rx_process.start()
     time.sleep(0.01)
 
     tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(dst, 'utf-8'), 'channel': txchannel, 'size':args.size})
-    time.sleep(0.01)
-
-    tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(dst, 'utf-8'), 'channel': txchannel, 'size':args.size})
     tx_process.start()
-
-
-
     
     try:    
         while True:
             packet = tun.read(tun.mtu)
             outgoing.put(packet)
-            #print("In main thread, size of the queue is: {}".format(outgoing.qsize()))
             #print("In main thread, size of the queue is: {}".format(outgoing.qsize()))
 
 
