@@ -1,3 +1,4 @@
+import time
 import scapy.all as scape
 
 
@@ -7,7 +8,7 @@ ICMPPacket = scape.IP(dst=dest)/scape.ICMP()
 payload="A"*496+"B"*500
 UDPPacket = scape.IP(dst = dest)/scape.UDP()/payload
 
-
+#scape.bytes
 UDPTest = scape.raw(UDPPacket)
 #print(UDPtest) #len 95 of stuff before payload.
 #print(type(UDPtest)) #class 'bytes'
@@ -15,8 +16,18 @@ UDPTest = scape.raw(UDPPacket)
 #ICMPTest = scape.raw(ICMPPacket)
 #print(ICMPTest) #len 104 of bytes. ICMP has 20 bytes IP header, 8 bytes ICMP header, rest is payload (for ping we are guessing)
 #print(type(ICMPTest)) class 'bytes'
-
-
+#int.from_bytes()
+boolTest = True
+while True:
+    hasData = True
+    if hasData and boolTest:
+        print("Hey")
+        boolTest = False
+    if hasData:
+        print("What up?")
+        time.sleep(0.1)
+        boolTest = True
+    
 def fragment(data, fragmentSize):
     """ Fragments and returns a list of any IP packet. The input parameter has to be an IP packet, as this is done via Scapy. 
     """

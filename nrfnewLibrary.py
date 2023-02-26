@@ -78,6 +78,7 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
                 print("Big packet, size expected: {}, size remaining: ".format(size, sizeRemaining))
                 finished = False
             else:
+                print("Packet: {} \n Len: {}".format(packet, sizeRemaining))
                 tun.write(packet)
         while(time.monotonic() - start) < 1000 or not sizeRemaining == 0: # Give a packet a total of one second to arrive, otherwise consider it discarded.
             if hasData:
@@ -155,7 +156,7 @@ if __name__ == "__main__":
     parser.add_argument('--size', dest='size', type=int, default=32, help='Packet size') 
     parser.add_argument('--txchannel', dest='txchannel', type=int, default=76, help='Tx channel', choices=range(0,125)) 
     parser.add_argument('--rxchannel', dest='rxchannel', type=int, default=81, help='Rx channel', choices=range(0,125))
-
+    
     args = parser.parse_args()
 
     #With a data rate of 2 Mbps, we need to at least tell the user that the channels should be at least 2Mhz from each other to ensure no cross talk. 
@@ -174,11 +175,11 @@ if __name__ == "__main__":
     dst = args.dst if args.base else args.src
     tun = setupIP(args.base)
    
-    rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(src, 'utf-8'), 'tun': tun, 'channel': rx})
+    rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(src, 'utf-8'), 'tun': tun, 'channel': rxchannel})
     rx_process.start()
     time.sleep(0.01)
 
-    tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(dst, 'utf-8'), 'channel': tx, 'size':args.size})
+    tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(dst, 'utf-8'), 'channel': txchannel, 'size':args.size})
     tx_process.start()
 
     ICMPPacket = scape.IP(dst="8.8.8.8")/scape.ICMP() # Merely for testing. Remove later. 

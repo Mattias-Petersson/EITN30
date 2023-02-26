@@ -12,6 +12,7 @@ git clone https://github.com/tmrh20/RF24.git RF24
 cd RF24
 ./configure --driver=SPIDEV # install.sh sets this if you choose to use SpiDev, this way we can enforce the policy to use SpiDev. Less customizability but more predictable. 
 cd pyRF24
+apt-get install libboost-python-dev # To prevent unknown 
 python3 setup.py build
 python3 setup.py install
 cd ../../../ # Go back to the main-folder to not confuse the user. 
