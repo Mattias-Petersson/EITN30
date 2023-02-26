@@ -25,11 +25,19 @@ def fragment(packet, fragmentSize):
 
     return frags
 
-def defragment(dataList):
+def defragment(data):
     """ Defragments and returns a packet. The input parameter has to be a fragmented IP packet as a list. (for now)
     """
-    data = b""
-    return data
+    # First, find out how big the incoming packet is. 
+    sizeOfPacket = int.from_bytes(data[2:4], "big")
+    if(sizeOfPacket < 32):
+        print("Small packet")
+        return data
+    else:
+        #Do other stuff
+        print("No causing errors here today.")
+    #data = b""
+    #return data
  
 def tx(nrf: RF24, address, channel, size):
     nrf.openWritingPipe(address)
@@ -41,6 +49,7 @@ def tx(nrf: RF24, address, channel, size):
             packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
             #print("TX: {}".format(packet)) #TODO: DELETE. 
             fragments = fragment(packet, size)
+            
             for i in fragments:
                 print("Fragment in TX: {}".format(i))
                 nrf.write(i)
@@ -51,16 +60,45 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
     nrf.startListening()
     print("Init RX on channel {}".format(channel))
     nrf.printDetails()
-    incoming = []
+    # For packets longer than 32 bytes, the following variables keep track of how big they are and when the packet is considered complete.  
+    incoming = b''
+    finished = True
+    sizeRemaining = 0
+    start = time.monotonic()
     while True:
         hasData, whatPipe = nrf.available_pipe()
-        if hasData:
-            size = nrf.getDynamicPayloadSize()
-            tmp = nrf.read(size)
-            packet = bytes(tmp)
-            print("Fragment received on RX: {}".format(packet))
-            tun.write(packet)
-            #packet = incoming.append(nrf.read(size))
+        if hasData and finished:
+            packet, size = readFromNRF(nrf)
+            sizeRemaining = int.from_bytes(packet[2:4], "big")
+            print("Fragment received on RX: {}, packet-size: {}".format(scape.hex_bytes(packet), sizeRemaining))
+            if sizeRemaining > size:
+                incoming += packet
+                sizeRemaining -= size
+                start = time.monotonic()
+                print("Big packet, size expected: {}, size remaining: ".format(size, sizeRemaining))
+                finished = False
+            else:
+                tun.write(packet)
+        while(time.monotonic() - start) < 1000 or not sizeRemaining == 0: # Give a packet a total of one second to arrive, otherwise consider it discarded.
+            if hasData:
+                packet, size = readFromNRF(nrf)
+                incoming += packet
+                sizeRemaining -= size
+                print("The incoming packet is now {} bytes big. The total length remaining is: {}".format(len(incoming), sizeRemaining))
+        if sizeRemaining == 0:
+            tun.write(incoming)
+        # Discards the incoming packet by resetting the variables.
+        incoming = b''
+        sizeRemaining = 0
+        finished = True
+        
+
+def readFromNRF(nrf: RF24):
+    size = nrf.getDynamicPayloadSize()
+    tmp = nrf.read(size)
+    return bytes(tmp), size
+            
+           #packet = incoming.append(nrf.read(size))
             #tun.write(test)
             #print(incoming)
 #        finished = defrag(incoming)
@@ -109,7 +147,9 @@ def setupIP(isBase):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='NRF24L01+. Please note that you should use the same src/dst for the base and the mobile unit, put the isBase to False and let the program handle the RX/TX pair.')
-    parser.add_argument('--isBase', dest='base', type= bool, default=True, help='If this is a base-station, set it to True.') 
+    
+    parser.add_argument('--base', dest='base', default=True, action=argparse.BooleanOptionalAction)
+    #parser.add_argument('--isBase', dest='base', type= bool, default=True, help='If this is a base-station, set it to True.') 
     parser.add_argument('--src', dest='src', type=str, default='1Node', help='NRF24L01+\'s source address (Base)')
     parser.add_argument('--dst', dest='dst', type=str, default='2Node', help='NRF24L01+\'s destination address (Base)')
     parser.add_argument('--size', dest='size', type=int, default=32, help='Packet size') 
