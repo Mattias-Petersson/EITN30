@@ -51,7 +51,7 @@ def tx(nrf: RF24, address, channel, size):
             fragments = fragment(packet, size)
             
             for i in fragments:
-                print("Fragment in TX: {}".format(i))
+                print("Fragment in TX: {}".format(scape.bytes_hex(i)))
                 nrf.write(i)
         
             
