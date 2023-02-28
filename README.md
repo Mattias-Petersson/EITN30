@@ -11,7 +11,9 @@ Scapy:
 Creating an IP packet:
 import scapy.all as scape
 packet = scape.IP(dst = "8.8.8.8")/scape.ICMP()
-or
-fullPacket = scape.IP(dst = 8.8.8.8")/scape.UDP()/'a'*500
 
-scape.send(p, iface="longge")
+or
+
+payload ="A"*500
+packet = scape.IP(dst = "8.8.8.8")/scape.UDP()/scape.Raw(load=payload)
+scape.send(packet, iface="longge")
