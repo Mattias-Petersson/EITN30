@@ -6,10 +6,14 @@ import scapy.all as scape
 import argparse
 from RF24 import RF24, RF24_PA_LOW, RF24_2MBPS,RF24_CRC_8
 
-global outgoing; outgoing = Queue() 
+outgoing = Queue() 
+
+rx_nrf = RF24(17, 0)
+rx_nrf.begin()
+tx_nrf = RF24(27, 10)
+tx_nrf.begin()
 
 def fragment(packet, fragmentSize):
-
     """ Fragments and returns a list of bytes. This is done by finding the number of fragments we want, and then splitting the bytes-like object into chunks of appropriate size. 
     The input parameter is an IP packet (or any bytes-like object) and the size the method should fragment these into.  
     """
@@ -22,22 +26,18 @@ def fragment(packet, fragmentSize):
     else: 
         numSteps = math.ceil(len(dataRaw)/sizeExHeader)
         for i in range(1, numSteps + 1):
-            data = appendIndex(dataRaw[0:sizeExHeader], i) #30 because max size of 32, 
+            data = appendIndex(dataRaw[0:sizeExHeader], i)
             frags.append(data)
             dataRaw = dataRaw[sizeExHeader:]
 
     
     frags[-1] = b'\x00\x00' + frags[-1][2:] # Set the last fragment to be the identifier of a finished packet. 
     return frags
+
 def appendIndex(data, index):
-    indexBytes = index.to_bytes(2, 'big')
+    indexBytes = index.to_bytes(2, 'big') # 2 bytes can store the maximum length of an IP packet (Note, we lose 1 byte so technically 2^16 - 2.)
     return indexBytes + data
 
-def defragment(data):
-    """ Defragments and returns a packet. The input parameter has to be a fragmented IP packet as a list. (for now)
-    """
-    # First, find out how big the incoming packet is. 
-    
  
 def tx(nrf: RF24, address, channel, size):
     nrf.openWritingPipe(address)
@@ -45,12 +45,12 @@ def tx(nrf: RF24, address, channel, size):
     print("Init TX on channel {}".format(channel))
     nrf.printDetails()
     while True:
-            print("Size of the queue? {}".format(outgoing.qsize()))
+            #print("Size of the queue? {}".format(outgoing.qsize()))
             packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
             #print("TX: {}".format(packet)) #TODO: DELETE. 
             fragments = fragment(packet, size)
             for i in fragments:
-                print("Fragment in TX: {}".format(scape.bytes_hex(i)))
+                #print("Fragment in TX: {}".format(scape.bytes_hex(i)))
                 nrf.write(i)
         
             
@@ -65,37 +65,27 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
         if hasData:
             packet = readFromNRF(nrf)
             incoming += packet[2:]
-            print("Packet index: {}".format(packet[0:2]))
+            #print("Packet index: {}".format(packet[0:2]))
             
             if packet[0:2] == b'\x00\x00':
-                print("Packet complete. Packet: {info} \n Size: {len}".format(info = scape.bytes_hex(incoming), len = len(incoming)))
+                #print("Packet complete. Packet: {info} \n Size: {len}".format(info = scape.bytes_hex(incoming), len = len(incoming)))
                 tun.write(incoming)
                 incoming = b''
-            #packet = incoming.append(nrf.read(size))
-            #tun.write(test)
-            #print(incoming)
-#        finished = defrag(incoming)
-#        tun.write(finished)
         
 
 def readFromNRF(nrf: RF24):
     size = nrf.getDynamicPayloadSize()
     tmp = nrf.read(size)
     return bytes(tmp)
-            
-           #packet = incoming.append(nrf.read(size))
-            #tun.write(test)
-            #print(incoming)
-#        finished = defrag(incoming)
-#        tun.write(finished)
+        
 
 def setupNRFModules(rx: RF24, tx: RF24, args):
     
     rx.setDataRate(RF24_2MBPS) 
     tx.setDataRate(RF24_2MBPS)
 
-    rx.setAutoAck(True)
-    tx.setAutoAck(True)
+    rx.setAutoAck(False)
+    tx.setAutoAck(False)
 
     rx.payloadSize = 32
     tx.payloadSize = 32
@@ -127,7 +117,8 @@ def setupIP(isBase):
     print("TUN interface online, with values \n Address:  {} \n Destination: {} \n Network mask: {}".format(tun.addr, tun.dstaddr, tun.netmask) )
     return tun
 
-
+def checkForTurbo():
+    print("Hey")
 
 
 if __name__ == "__main__":
@@ -148,10 +139,6 @@ if __name__ == "__main__":
         print("Do note that having tx and rx channels this close to each other can introduce cross-talk.")
 
     # initialize the nRF24L01 on the spi bus object
-    rx_nrf = RF24(17, 0)
-    rx_nrf.begin()
-    tx_nrf = RF24(27, 10)
-    tx_nrf.begin()
 
     txchannel = args.txchannel if args.base else args.rxchannel
     rxchannel = args.rxchannel if args.base else args.txchannel
@@ -183,6 +170,6 @@ if __name__ == "__main__":
     # Setting the radios to stop listening seems to be best practice. 
     rx_nrf.stopListening()  
     tx_nrf.stopListening()
-
+    outgoing = Queue()
     tun.down()
     print("Threads ended, radios stopped listening, TUN interface down.")
