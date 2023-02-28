@@ -7,11 +7,39 @@ import argparse
 from RF24 import RF24, RF24_PA_LOW, RF24_2MBPS,RF24_CRC_8
 
 outgoing = Queue() 
-
 rx_nrf = RF24(17, 0)
 rx_nrf.begin()
 tx_nrf = RF24(27, 10)
 tx_nrf.begin()
+
+def setupNRFModules(args):
+    
+    rx_nrf.setDataRate(RF24_2MBPS) 
+    tx_nrf.setDataRate(RF24_2MBPS)
+
+    rx_nrf.setAutoAck(False)
+    tx_nrf.setAutoAck(False)
+
+    rx_nrf.payloadSize = 32
+    tx_nrf.payloadSize = 32
+
+    rx_nrf.setCRCLength(RF24_CRC_8)
+    tx_nrf.setCRCLength(RF24_CRC_8)
+
+    #Low power because we are using them next to one another! 
+
+    rx_nrf.setPALevel(RF24_PA_LOW) 
+    tx_nrf.setPALevel(RF24_PA_LOW)
+
+    # Other than initial setup, set up so the RX-TX pair are listening on each other's channels. 
+    values = {
+        'src': args.src if args.base else args.dst,
+        'rx': args.rxchannel if args.base else args.txchannel,
+        'dst':  args.dst if args.base else args.src,
+        'tx': args.txchannel if args.base else args.rxchannel
+    }
+    return values
+
 
 def fragment(packet, fragmentSize):
     """ Fragments and returns a list of bytes. This is done by finding the number of fragments we want, and then splitting the bytes-like object into chunks of appropriate size. 
@@ -79,25 +107,6 @@ def readFromNRF(nrf: RF24):
     return bytes(tmp)
         
 
-def setupNRFModules(rx: RF24, tx: RF24, args):
-    
-    rx.setDataRate(RF24_2MBPS) 
-    tx.setDataRate(RF24_2MBPS)
-
-    rx.setAutoAck(False)
-    tx.setAutoAck(False)
-
-    rx.payloadSize = 32
-    tx.payloadSize = 32
-
-    rx.setCRCLength(RF24_CRC_8)
-    tx.setCRCLength(RF24_CRC_8)
-
-    #Low power because we are using them next to one another! 
-
-    rx.setPALevel(RF24_PA_LOW) 
-    tx.setPALevel(RF24_PA_LOW)
-    # Setting up the NRF modules in this method as well. 
 """
     if(args.base):
         return args.txchannel, args.rxchannel, args.src, args.dst
@@ -129,8 +138,8 @@ if __name__ == "__main__":
     parser.add_argument('--src', dest='src', type=str, default='1Node', help='NRF24L01+\'s source address (Base)')
     parser.add_argument('--dst', dest='dst', type=str, default='2Node', help='NRF24L01+\'s destination address (Base)')
     parser.add_argument('--size', dest='size', type=int, default=32, help='Packet size') 
-    parser.add_argument('--txchannel', dest='txchannel', type=int, default=76, help='Tx channel', choices=range(0,125)) 
-    parser.add_argument('--rxchannel', dest='rxchannel', type=int, default=81, help='Rx channel', choices=range(0,125))
+    parser.add_argument('--txchannel', dest='txchannel', type=int, default=101, help='Tx channel', choices=range(0,125)) 
+    parser.add_argument('--rxchannel', dest='rxchannel', type=int, default=103, help='Rx channel', choices=range(0,125))
     
     args = parser.parse_args()
 
@@ -138,19 +147,15 @@ if __name__ == "__main__":
     if abs(args.txchannel - args.rxchannel) < 2:
         print("Do note that having tx and rx channels this close to each other can introduce cross-talk.")
 
-    # initialize the nRF24L01 on the spi bus object
-
-    txchannel = args.txchannel if args.base else args.rxchannel
-    rxchannel = args.rxchannel if args.base else args.txchannel
-    src = args.src if args.base else args.dst
-    dst = args.dst if args.base else args.src
+    # Setup of NRF modules, channels, and the Tun interface. 
+    vars = setupNRFModules(args)
     tun = setupIP(args.base)
    
-    rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(src, 'utf-8'), 'tun': tun, 'channel': rxchannel})
+    rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(vars['src'], 'utf-8'), 'tun': tun, 'channel': vars['rx']})
     rx_process.start()
     time.sleep(0.01)
 
-    tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(dst, 'utf-8'), 'channel': txchannel, 'size':args.size})
+    tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'channel': vars['tx'], 'size':args.size})
     tx_process.start()
 
     ICMPPacket = scape.IP(dst="8.8.8.8")/scape.ICMP() # Merely for testing. Remove later. 
