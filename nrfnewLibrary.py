@@ -13,31 +13,31 @@ def fragment(packet, fragmentSize):
     """ Fragments and returns a list of bytes. This is done by finding the number of fragments we want, and then splitting the bytes-like object into chunks of appropriate size. 
     The input parameter is an IP packet (or any bytes-like object) and the size the method should fragment these into.  
     """
+    sizeExHeader = fragmentSize - 2 # This is very likely to always be 32 - 2. However, it does not hurt to future proof this method in case of size changes in radio MTU.
     frags = []
     dataRaw = bytes(packet)
-    if len(dataRaw) <= fragmentSize:
-        frags.append(dataRaw)
+    if len(dataRaw) <= sizeExHeader:
+        data = appendIndex(dataRaw, 0)
+        frags.append(data)
     else: 
-        numSteps = math.ceil(len(dataRaw)/fragmentSize)
-        for _ in range(numSteps):
-            frags.append(dataRaw[0:32])
-            dataRaw = dataRaw[32:]
+        numSteps = math.ceil(len(dataRaw)/sizeExHeader)
+        for i in range(1, numSteps + 1):
+            data = appendIndex(dataRaw[0:sizeExHeader], i) #30 because max size of 32, 
+            frags.append(data)
+            dataRaw = dataRaw[sizeExHeader:]
 
+    
+    frags[-1] = b'\x00\x00' + frags[-1][2:] # Set the last fragment to be the identifier of a finished packet. 
     return frags
+def appendIndex(data, index):
+    indexBytes = index.to_bytes(2, 'big')
+    return indexBytes + data
 
 def defragment(data):
     """ Defragments and returns a packet. The input parameter has to be a fragmented IP packet as a list. (for now)
     """
     # First, find out how big the incoming packet is. 
-    sizeOfPacket = int.from_bytes(data[2:4], "big")
-    if(sizeOfPacket < 32):
-        print("Small packet")
-        return data
-    else:
-        #Do other stuff
-        print("No causing errors here today.")
-    #data = b""
-    #return data
+    
  
 def tx(nrf: RF24, address, channel, size):
     nrf.openWritingPipe(address)
@@ -49,7 +49,6 @@ def tx(nrf: RF24, address, channel, size):
             packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
             #print("TX: {}".format(packet)) #TODO: DELETE. 
             fragments = fragment(packet, size)
-            
             for i in fragments:
                 print("Fragment in TX: {}".format(scape.bytes_hex(i)))
                 nrf.write(i)
@@ -60,44 +59,29 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
     nrf.startListening()
     print("Init RX on channel {}".format(channel))
     nrf.printDetails()
-    # For packets longer than 32 bytes, the following variables keep track of how big they are and when the packet is considered complete.  
     incoming = b''
-    finished = True
-    sizeRemaining = 0
-    start = time.monotonic()
     while True:
         hasData, whatPipe = nrf.available_pipe()
-        if hasData and finished:
-            packet, size = readFromNRF(nrf)
-            sizeRemaining = int.from_bytes(packet[2:4], "big")
-            print("Fragment received on RX: {}, packet-size: {}".format(scape.hex_bytes(packet), sizeRemaining))
-            if sizeRemaining > size:
-                incoming += packet
-                sizeRemaining -= size
-                start = time.monotonic()
-                print("Big packet, size expected: {}, size remaining: ".format(size, sizeRemaining))
-                finished = False
-            else:
-                print("Packet: {} \n Len: {}".format(packet, sizeRemaining))
-                tun.write(packet)
-        while(time.monotonic() - start) < 1000 or not sizeRemaining == 0: # Give a packet a total of one second to arrive, otherwise consider it discarded.
-            if hasData:
-                packet, size = readFromNRF(nrf)
-                incoming += packet
-                sizeRemaining -= size
-                print("The incoming packet is now {} bytes big. The total length remaining is: {}".format(len(incoming), sizeRemaining))
-        if sizeRemaining == 0:
-            tun.write(incoming)
-        # Discards the incoming packet by resetting the variables.
-        incoming = b''
-        sizeRemaining = 0
-        finished = True
+        if hasData:
+            packet = readFromNRF(nrf)
+            incoming += packet[2:]
+            print("Packet index: {}".format(packet[0:2]))
+            
+            if packet[0:2] == b'\x00\x00':
+                print("Packet complete. Packet: {info} \n Size: {len}".format(info = scape.bytes_hex(incoming), len = len(incoming)))
+                tun.write(incoming)
+                incoming = b''
+            #packet = incoming.append(nrf.read(size))
+            #tun.write(test)
+            #print(incoming)
+#        finished = defrag(incoming)
+#        tun.write(finished)
         
 
 def readFromNRF(nrf: RF24):
     size = nrf.getDynamicPayloadSize()
     tmp = nrf.read(size)
-    return bytes(tmp), size
+    return bytes(tmp)
             
            #packet = incoming.append(nrf.read(size))
             #tun.write(test)
