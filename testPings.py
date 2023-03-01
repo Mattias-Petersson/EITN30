@@ -11,3 +11,6 @@ def ping(IP):
 
 def arbSend(p):
     scape.send(p, iface="longge")
+
+def testtest() -> tuple[str, str, int]:
+    print("Hey")

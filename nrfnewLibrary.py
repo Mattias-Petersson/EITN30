@@ -1,5 +1,6 @@
 import math
-from multiprocessing import Process, Queue
+from multiprocessing import Process, Queue, Lock
+import os
 import time
 from pytun import TunTapDevice
 import scapy.all as scape
@@ -11,7 +12,6 @@ rx_nrf = RF24(17, 0)
 rx_nrf.begin()
 tx_nrf = RF24(27, 10)
 tx_nrf.begin()
-
 def setupNRFModules(args):
     
     rx_nrf.setDataRate(RF24_2MBPS) 
@@ -32,14 +32,12 @@ def setupNRFModules(args):
     tx_nrf.setPALevel(RF24_PA_MAX)
 
     # Other than initial setup, set up so the RX-TX pair are listening on each other's channels. 
-    values = {
+    return {
         'src': args.src if args.base else args.dst,
         'rx': args.rxchannel if args.base else args.txchannel,
         'dst':  args.dst if args.base else args.src,
         'tx': args.txchannel if args.base else args.rxchannel
     }
-    return values
-
 
 def fragment(packet, fragmentSize):
     """ Fragments and returns a list of bytes. This is done by finding the number of fragments we want, and then splitting the bytes-like object into chunks of appropriate size. 
@@ -51,19 +49,22 @@ def fragment(packet, fragmentSize):
     if len(dataRaw) <= sizeExHeader:
         data = appendIndex(dataRaw, 0)
         frags.append(data)
+    if len(dataRaw) == (2**16) - 1: # Since we are using the 0 byte as an index and not for the length, without this method the 'else' would crash. 
+        halfway = math.floor((2**16 - 1)/2)
+        fragment(dataRaw[0:halfway])
+        fragment(dataRaw[halfway + 1:])
     else: 
         numSteps = math.ceil(len(dataRaw)/sizeExHeader)
         for i in range(1, numSteps + 1):
-            data = appendIndex(dataRaw[0:sizeExHeader], 65535)
+            data = appendIndex(dataRaw[0:sizeExHeader], i)
             frags.append(data)
             dataRaw = dataRaw[sizeExHeader:]
-
     
     frags[-1] = b'\x00\x00' + frags[-1][2:] # Set the last fragment to be the identifier of a finished packet. 
     return frags
 
 def appendIndex(data, index):
-    indexBytes = index.to_bytes(2, 'big') # 2 bytes can store the maximum length of an IP packet (Note, we lose 1 byte so technically 2^16 - 2.)
+    indexBytes = index.to_bytes(2, 'big') # 2 bytes can store the maximum length of an IP packet.
     return indexBytes + data
 
  
@@ -93,17 +94,11 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
         if hasData:
             packet = readFromNRF(nrf)
             header = packet[0:2]
-            if(header == b'\xff\xff'):
-                incoming += packet[2:]
-            #print("Packet index: {}".format(packet[0:2]))
+            print(scape.bytes_hex(header))
+            incoming += packet[2:]
             if header == b'\x00\x00':
-                incoming += packet[2:]
                 tun.write(incoming)
                 print("Packet complete. Packet: {info} \n Size: {len}".format(info = scape.bytes_hex(incoming), len = len(incoming)))
-                
-                incoming = b''
-            else: 
-                tun.write(packet)
                 incoming = b''
 
 def readFromNRF(nrf: RF24):
@@ -122,14 +117,45 @@ def setupIP(isBase):
     tun.netmask = '255.255.255.252' # /30
     tun.mtu = 1500
     tun.up()
+    if isBase:
+        os.system('''
+        sudo iptables -t nat -A POSTROUTING -o wlan0 -j MASQUERADE
+        sudo iptables -A FORWARD -i wlan0 -o longge -m state --state RELATED,ESTABLISHED -j ACCEPT
+        sudo iptables -A FORWARD -i longge -o wlan0 -j ACCEPT
+        ''')
+    else:
+        os.system('sudo ip route add default via {} dev longge'.format(ipBase))
     print("TUN interface online, with values \n Address:  {} \n Destination: {} \n Network mask: {}".format(tun.addr, tun.dstaddr, tun.netmask) )
     return tun
-def doubleTX():
-    print("Shutting down the rx-process.")
-    rx_process.join()
-    print("Successfully shut down")
-    tx2 = Process(target=tx, kwargs={'nrf':rx_nrf, 'address':bytes(vars['src'], 'utf-8'), 'tun': tun, 'channel': vars['rx']})
-    
+
+
+def doubleTX(timeToLive):
+    Process(target=doubleProcess, args=(timeToLive, rx_process)).start()
+def doubleRX(timeToLive):
+    Process(target=doubleProcess, args=(timeToLive, tx_process)).start()
+
+
+# The NRF process this takes in is the one to kill. 
+lock = Lock()
+def doubleProcess(timeToLive, nrf_process: Process):
+    lock.acquire()
+    print("Successfully shut down old operation. Starting new process for {}".format(nrf_process))
+     # Since we want the pairs to work together, we need to set the new tx to use the old RX values. 
+    new_process = createDoubledProcess(nrf_process is tx_process)
+    new_process.start()
+    print("Letting this manager thread sleep for {} seconds".format(timeToLive))
+    time.sleep(timeToLive)
+ 
+    new_process.join()
+    print("Time expired, recreating old process.")
+    old_process = createDoubledProcess(nrf_process is not tx_process)
+    old_process.start()
+    lock.release()
+
+def createDoubledProcess(isTX):
+    if(isTX):
+        return Process(target=tx, kwargs={'nrf':rx_nrf, 'address':bytes(vars['src'], 'utf-8'), 'channel': vars['rx'], 'size':args.size})
+    return Process(target=rx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'tun': tun, 'channel': vars['tx']})
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='NRF24L01+. Please note that you should use the same src/dst for the base and the mobile unit, put the isBase to False and let the program handle the RX/TX pair.')
@@ -160,10 +186,10 @@ if __name__ == "__main__":
     ICMPPacket = scape.IP(dst="8.8.8.8")/scape.ICMP() # Merely for testing. Remove later. 
     
     try:    
-        while True:
+        while True:    
             packet = tun.read(tun.mtu)
             outgoing.put(packet)
-            #print("In main thread, size of the queue is: {}".format(outgoing.qsize()))
+            print("In main thread, size of the queue is: {}".format(outgoing.qsize()))
 
 
     except KeyboardInterrupt:
@@ -174,7 +200,6 @@ if __name__ == "__main__":
     # Setting the radios to stop listening seems to be best practice. 
     rx_nrf.stopListening()  
     tx_nrf.stopListening()
-    print(outgoing.qsize())
     outgoing.close()
     tun.down()
     print("Threads ended, radios stopped listening, TUN interface down.")
