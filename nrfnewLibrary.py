@@ -4,9 +4,9 @@ import time
 from pytun import TunTapDevice
 import scapy.all as scape
 import argparse
-from RF24 import RF24, RF24_PA_LOW, RF24_2MBPS,RF24_CRC_8
+from RF24 import RF24, RF24_PA_LOW, RF24_PA_MAX, RF24_2MBPS,RF24_CRC_8
 
-outgoing = Queue() 
+outgoing = Queue()
 rx_nrf = RF24(17, 0)
 rx_nrf.begin()
 tx_nrf = RF24(27, 10)
@@ -28,8 +28,8 @@ def setupNRFModules(args):
 
     #Low power because we are using them next to one another! 
 
-    rx_nrf.setPALevel(RF24_PA_LOW) 
-    tx_nrf.setPALevel(RF24_PA_LOW)
+    rx_nrf.setPALevel(RF24_PA_MAX) 
+    tx_nrf.setPALevel(RF24_PA_MAX)
 
     # Other than initial setup, set up so the RX-TX pair are listening on each other's channels. 
     values = {
@@ -54,7 +54,7 @@ def fragment(packet, fragmentSize):
     else: 
         numSteps = math.ceil(len(dataRaw)/sizeExHeader)
         for i in range(1, numSteps + 1):
-            data = appendIndex(dataRaw[0:sizeExHeader], i)
+            data = appendIndex(dataRaw[0:sizeExHeader], 65535)
             frags.append(data)
             dataRaw = dataRaw[sizeExHeader:]
 
@@ -75,7 +75,7 @@ def tx(nrf: RF24, address, channel, size):
     while True:
             #print("Size of the queue? {}".format(outgoing.qsize()))
             packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
-            #print("TX: {}".format(packet)) #TODO: DELETE. 
+            print("TX: {}".format(packet)) #TODO: DELETE. 
             fragments = fragment(packet, size)
             for i in fragments:
                 #print("Fragment in TX: {}".format(scape.bytes_hex(i)))
@@ -89,17 +89,22 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
     nrf.printDetails()
     incoming = b''
     while True:
-        hasData, whatPipe = nrf.available_pipe()
+        hasData, _ = nrf.available_pipe() # Do not care about what pipe the data comes in at. 
         if hasData:
             packet = readFromNRF(nrf)
-            incoming += packet[2:]
+            header = packet[0:2]
+            if(header == b'\xff\xff'):
+                incoming += packet[2:]
             #print("Packet index: {}".format(packet[0:2]))
-            
-            if packet[0:2] == b'\x00\x00':
-                #print("Packet complete. Packet: {info} \n Size: {len}".format(info = scape.bytes_hex(incoming), len = len(incoming)))
+            if header == b'\x00\x00':
+                incoming += packet[2:]
                 tun.write(incoming)
+                print("Packet complete. Packet: {info} \n Size: {len}".format(info = scape.bytes_hex(incoming), len = len(incoming)))
+                
                 incoming = b''
-        
+            else: 
+                tun.write(packet)
+                incoming = b''
 
 def readFromNRF(nrf: RF24):
     size = nrf.getDynamicPayloadSize()
@@ -107,12 +112,6 @@ def readFromNRF(nrf: RF24):
     return bytes(tmp)
         
 
-"""
-    if(args.base):
-        return args.txchannel, args.rxchannel, args.src, args.dst
-    
-    return args.rxchannel, args.txchannel, args.dst, args.src
-"""
 def setupIP(isBase):
     ipBase = '20.0.0.1'
     ipMobile = '20.0.0.2'
@@ -125,16 +124,16 @@ def setupIP(isBase):
     tun.up()
     print("TUN interface online, with values \n Address:  {} \n Destination: {} \n Network mask: {}".format(tun.addr, tun.dstaddr, tun.netmask) )
     return tun
-
-def checkForTurbo():
-    print("Hey")
-
+def doubleTX():
+    print("Shutting down the rx-process.")
+    rx_process.join()
+    print("Successfully shut down")
+    tx2 = Process(target=tx, kwargs={'nrf':rx_nrf, 'address':bytes(vars['src'], 'utf-8'), 'tun': tun, 'channel': vars['rx']})
+    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='NRF24L01+. Please note that you should use the same src/dst for the base and the mobile unit, put the isBase to False and let the program handle the RX/TX pair.')
-    
     parser.add_argument('--base', dest='base', default=True, action=argparse.BooleanOptionalAction)
-    #parser.add_argument('--isBase', dest='base', type= bool, default=True, help='If this is a base-station, set it to True.') 
     parser.add_argument('--src', dest='src', type=str, default='1Node', help='NRF24L01+\'s source address (Base)')
     parser.add_argument('--dst', dest='dst', type=str, default='2Node', help='NRF24L01+\'s destination address (Base)')
     parser.add_argument('--size', dest='size', type=int, default=32, help='Packet size') 
@@ -175,6 +174,7 @@ if __name__ == "__main__":
     # Setting the radios to stop listening seems to be best practice. 
     rx_nrf.stopListening()  
     tx_nrf.stopListening()
-    outgoing = Queue()
+    print(outgoing.qsize())
+    outgoing.close()
     tun.down()
     print("Threads ended, radios stopped listening, TUN interface down.")
