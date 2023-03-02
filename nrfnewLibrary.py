@@ -12,6 +12,7 @@ rx_nrf = RF24(17, 0)
 rx_nrf.begin()
 tx_nrf = RF24(27, 10)
 tx_nrf.begin()
+
 def setupNRFModules(args):
     
     rx_nrf.setDataRate(RF24_2MBPS) 
@@ -28,8 +29,8 @@ def setupNRFModules(args):
 
     #Low power because we are using them next to one another! 
 
-    rx_nrf.setPALevel(RF24_PA_MAX) 
-    tx_nrf.setPALevel(RF24_PA_MAX)
+    rx_nrf.setPALevel(RF24_PA_LOW) 
+    tx_nrf.setPALevel(RF24_PA_LOW)
 
     # Other than initial setup, set up so the RX-TX pair are listening on each other's channels. 
     return {
