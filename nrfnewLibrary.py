@@ -1,17 +1,20 @@
+from collections import defaultdict
 import math
-from multiprocessing import Process, Queue, Lock
+from multiprocessing import Process, Manager, Lock
 import os
 import time
 from pytun import TunTapDevice
 import scapy.all as scape
 import argparse
 from RF24 import RF24, RF24_PA_LOW, RF24_PA_MAX, RF24_2MBPS,RF24_CRC_8
-
-outgoing = Queue()
+manager = Manager()
+outgoing = manager.Queue()
 rx_nrf = RF24(17, 0)
 rx_nrf.begin()
+rx_process = Process
 tx_nrf = RF24(27, 10)
 tx_nrf.begin()
+tx_process = Process
 
 def setupNRFModules(args):
     
@@ -44,30 +47,20 @@ def fragment(packet, fragmentSize):
     """ Fragments and returns a list of bytes. This is done by finding the number of fragments we want, and then splitting the bytes-like object into chunks of appropriate size. 
     The input parameter is an IP packet (or any bytes-like object) and the size the method should fragment these into.  
     """
-    sizeExHeader = fragmentSize - 2 # This is very likely to always be 32 - 2. However, it does not hurt to future proof this method in case of size changes in radio MTU.
+    sizeExHeader = fragmentSize - 1 # This is very likely to always be 32 - 3. However, it does not hurt to future proof this method in case of size changes in radio MTU.
     frags = []
     dataRaw = bytes(packet)
     if len(dataRaw) <= sizeExHeader:
-        data = appendIndex(dataRaw, 0)
-        frags.append(data)
-    if len(dataRaw) == (2**16) - 1: # Since we are using the 0 byte as an index and not for the length, without this method the 'else' would crash. 
-        halfway = math.floor((2**16 - 1)/2)
-        fragment(dataRaw[0:halfway])
-        fragment(dataRaw[halfway + 1:])
+        frags.append('\xfd' + dataRaw)
     else: 
         numSteps = math.ceil(len(dataRaw)/sizeExHeader)
-        for i in range(1, numSteps + 1):
-            data = appendIndex(dataRaw[0:sizeExHeader], i)
+        for _ in range(1, numSteps + 1):
+            data = b'\xfe' + dataRaw[0:sizeExHeader]
             frags.append(data)
             dataRaw = dataRaw[sizeExHeader:]
     
-    frags[-1] = b'\x00\x00' + frags[-1][2:] # Set the last fragment to be the identifier of a finished packet. 
+    frags[-1] = b'\xff' + frags[-1][1:] # Set the last fragment to be the identifier of a finished packet. 
     return frags
-
-def appendIndex(data, index):
-    indexBytes = index.to_bytes(2, 'big') # 2 bytes can store the maximum length of an IP packet.
-    return indexBytes + data
-
  
 def tx(nrf: RF24, address, channel, size):
     nrf.openWritingPipe(address)
@@ -79,29 +72,58 @@ def tx(nrf: RF24, address, channel, size):
             packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
             print("TX: {}".format(packet)) #TODO: DELETE. 
             fragments = fragment(packet, size)
+            # Making sure we only check small packets for double speed-mode. 
+            if len(fragments) == 1 and activateDouble(fragments[0]):
+                print("Not supposed to get here TX")
+                #doubleTX(int.from_bytes(fragments[0][-1:]))
             for i in fragments:
                 #print("Fragment in TX: {}".format(scape.bytes_hex(i)))
                 nrf.write(i)
-        
-            
+
+def activateDouble(bytes):
+    return bytes[-6:-1] == b'\xff\xff\xff\xff\xff'
+
 def rx(nrf: RF24, address, tun: TunTapDevice, channel):
     nrf.openReadingPipe(1, address)
     nrf.startListening()
     print("Init RX on channel {}".format(channel))
     nrf.printDetails()
+ 
     incoming = b''
     while True:
         hasData, _ = nrf.available_pipe() # Do not care about what pipe the data comes in at. 
         if hasData:
             packet = readFromNRF(nrf)
-            header = packet[0:2]
-            print(scape.bytes_hex(header))
-            incoming += packet[2:]
+            if activateDouble(packet):
+                print("Not supposed to get here RX")
+                #doubleRX(int.from_bytes(packet[-1:]))
+            fragments = packet[0:1]
+            remainingPacket = packet[1:]
+
+
+
+            # Checks if the packet received is a fragment, is small enough to not be one, or is the last fragment. 
+            if fragments == b'\xfe':
+                incoming += remainingPacket
+            elif fragments == b'\xff':
+                incoming += remainingPacket
+                tun.write(incoming)
+                incoming = b''
+            elif fragments == b'\xfd':
+                tun.write(remainingPacket)
+            # An error occur if we do not account for packets not going through our fragment method. If so, just write it to the tun-interface. 
+            else:
+                tun.write(packet)
+            """
+            dict[scape.bytes_hex(header)] += 1
+            print(sorted(dict.items(), key = lambda x: x[1], reverse=True))
+
+            incoming += packet[3:]
             if header == b'\x00\x00':
                 tun.write(incoming)
                 print("Packet complete. Packet: {info} \n Size: {len}".format(info = scape.bytes_hex(incoming), len = len(incoming)))
                 incoming = b''
-
+"""
 def readFromNRF(nrf: RF24):
     size = nrf.getDynamicPayloadSize()
     tmp = nrf.read(size)
@@ -140,21 +162,24 @@ def doubleRX(timeToLive):
 lock = Lock()
 def doubleProcess(timeToLive, nrf_process: Process):
     lock.acquire()
-    print("Successfully shut down old operation. Starting new process for {}".format(nrf_process))
+    nrf_process.kill()
+    nrf_process.join()
+    print("Successfully shut down old operation. Starting new.".format(nrf_process))
      # Since we want the pairs to work together, we need to set the new tx to use the old RX values. 
-    new_process = createDoubledProcess(nrf_process is tx_process)
+    new_process = createDoubledProcess(nrf_process is not tx_process)
     new_process.start()
     print("Letting this manager thread sleep for {} seconds".format(timeToLive))
     time.sleep(timeToLive)
  
+    new_process.kill()
     new_process.join()
     print("Time expired, recreating old process.")
-    old_process = createDoubledProcess(nrf_process is not tx_process)
+    old_process = createDoubledProcess(nrf_process is tx_process)
     old_process.start()
     lock.release()
 
-def createDoubledProcess(isTX):
-    if(isTX):
+def createDoubledProcess(double_output):
+    if(double_output):
         return Process(target=tx, kwargs={'nrf':rx_nrf, 'address':bytes(vars['src'], 'utf-8'), 'channel': vars['rx'], 'size':args.size})
     return Process(target=rx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'tun': tun, 'channel': vars['tx']})
 
@@ -203,4 +228,5 @@ if __name__ == "__main__":
     tx_nrf.stopListening()
     outgoing.close()
     tun.down()
+    
     print("Threads ended, radios stopped listening, TUN interface down.")
