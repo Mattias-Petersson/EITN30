@@ -104,16 +104,21 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
 
             # Checks if the packet received is a fragment, is small enough to not be one, or is the last fragment. 
             if fragments == b'\xfe':
+                # more  fragments
                 incoming += remainingPacket
             elif fragments == b'\xff':
+                # last fragment
                 incoming += remainingPacket
                 tun.write(incoming)
                 incoming = b''
             elif fragments == b'\xfd':
+                # size are less than 31 bytes
                 tun.write(remainingPacket)
             # An error occur if we do not account for packets not going through our fragment method. If so, just write it to the tun-interface. 
             else:
+                #tun.write(fragments+packet)
                 tun.write(packet)
+
             """
             dict[scape.bytes_hex(header)] += 1
             print(sorted(dict.items(), key = lambda x: x[1], reverse=True))
@@ -208,8 +213,6 @@ if __name__ == "__main__":
 
     tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'channel': vars['tx'], 'size':args.size})
     tx_process.start()
-
-    ICMPPacket = scape.IP(dst="8.8.8.8")/scape.ICMP() # Merely for testing. Remove later. 
     
     try:    
         while True:    

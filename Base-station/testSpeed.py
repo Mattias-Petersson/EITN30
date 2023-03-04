@@ -1,5 +1,5 @@
 import math
-from multiprocessing import Process, Queue, Lock
+from multiprocessing import Manager, Process, Lock
 import os
 import time
 from pytun import TunTapDevice
@@ -7,11 +7,20 @@ import scapy.all as scape
 import argparse
 from RF24 import RF24, RF24_PA_LOW, RF24_PA_MAX, RF24_2MBPS,RF24_CRC_8
 
-outgoing = Queue()
+manager = Manager()
+outgoing = manager.Queue()
 rx_nrf = RF24(17, 0)
 rx_nrf.begin()
+rx_process = Process
 tx_nrf = RF24(27, 10)
 tx_nrf.begin()
+tx_process = Process
+
+RecevivedBytes = 0
+T = []
+transmission_time = 0
+R = []
+receving_time = 0
 
 def setupNRFModules(args):
     
@@ -44,84 +53,98 @@ def fragment(packet, fragmentSize):
     """ Fragments and returns a list of bytes. This is done by finding the number of fragments we want, and then splitting the bytes-like object into chunks of appropriate size. 
     The input parameter is an IP packet (or any bytes-like object) and the size the method should fragment these into.  
     """
-    sizeExHeader = fragmentSize - 2 # This is very likely to always be 32 - 2. However, it does not hurt to future proof this method in case of size changes in radio MTU.
+    sizeExHeader = fragmentSize - 1 # This is very likely to always be 32 - 1. However, it does not hurt to future proof this method in case of size changes in radio MTU.
     frags = []
     dataRaw = bytes(packet)
     if len(dataRaw) <= sizeExHeader:
-        data = appendIndex(dataRaw, 0)
-        frags.append(data)
-    elif len(dataRaw) == (2**16) - 1: # Since we are using the 0 byte as an index and not for the length, without this method the 'else' would crash. 
-        halfway = math.floor((2**16 - 1)/2)
-        fragment(dataRaw[0:halfway])
-        fragment(dataRaw[halfway + 1:])
+        frags.append('\xfd' + dataRaw)
     else: 
         numSteps = math.ceil(len(dataRaw)/sizeExHeader)
-        for i in range(1, numSteps + 1):
-            data = appendIndex(dataRaw[0:sizeExHeader], i)
+        for _ in range(1, numSteps + 1):
+            data = b'\xfe' + dataRaw[0:sizeExHeader]
             frags.append(data)
             dataRaw = dataRaw[sizeExHeader:]
     
-    frags[-1] = b'\x00\x00' + frags[-1][2:] # Set the last fragment to be the identifier of a finished packet. 
+    frags[-1] = b'\xff' + frags[-1][1:] # Set the last fragment to be the identifier of a finished packet. 
     return frags
-
-def appendIndex(data, index):
-    indexBytes = index.to_bytes(2, 'big') # 2 bytes can store the maximum length of an IP packet.
-    return indexBytes + data
+ 
 
  
 def tx(nrf: RF24, address, channel, size):
+    global transmission_time
     nrf.openWritingPipe(address)
     nrf.stopListening()
     print("Init TX on channel {}".format(channel))
     nrf.printDetails()
-    incoming = b""
-    ts = 0
-    
-    while len(incoming)<20000:
+    transmission_time = 0
+    while len(T)<2000:
             #print("Size of the queue? {}".format(outgoing.qsize()))
             start_timer = time.monotonic_ns()   
             #packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
-            packet = ts.to_bytes(32, "big") # may return OverflowError if packet is too big.
-            incoming += packet
+            packet = transmission_time.to_bytes(31, "big") # may return OverflowError if packet is too big.
+            T.append(transmission_time) 
             print("TX: {}".format(packet)) #TODO: DELETE. 
             fragments = fragment(packet, size)
             for i in fragments:
                 #print("Fragment in TX: {}".format(scape.bytes_hex(i)))
-                nrf.write(i)
+                nrf.writeFast(i)
             end_timer = time.monotonic_ns()
-            ts += end_timer - start_timer
-    
-    print("Tx done, throughput: {}".format(len(incoming)/ts))
+            transmission_time += (end_timer - start_timer)/10^9 #convert to seconds. 
+            
+    print("Tx done, time: {}".format(transmission_time))
         
 
         
             
 def rx(nrf: RF24, address, tun: TunTapDevice, channel):
+    
     nrf.openReadingPipe(1, address)
     nrf.startListening()
     print("Init RX on channel {}".format(channel))
     nrf.printDetails()
     incoming = b''
-    Bytes = 0
-    timeElapsed = 0
+
     while True:
+        global receving_time
+        global RecevivedBytes
         hasData, _ = nrf.available_pipe() # Do not care about what pipe the data comes in at. 
         if hasData:
             start_timer = time.monotonic_ns()
             print("Received packet at  time : {}".format(start_timer))
             packet = readFromNRF(nrf)
-            header = packet[0:2]
+            header = packet[0:1]
+            data = packet[1:]
             print(scape.bytes_hex(header))
-            incoming += packet[2:]
-            if header == b'\x00\x00':
-                Bytes += len(incoming)
-                stop_timer = time.monotonic_ns()
-                timeElapsed += stop_timer - start_timer
-                #print("Packet complete. Packet: {info} \n Size: {len}".format(info = scape.bytes_hex(incoming), len = len(incoming)))
-                print("Packet complete.  timeElapsed: {time}".format(timeElapsed))
-                print("Throughput: {}".format(Bytes/timeElapsed))
-                #print(incoming)
+            
+            # Checks if the packet received is a fragment, is small enough to not be one, or is the last fragment. 
+            if header == b'\xfe':
+                # more  fragments
+                incoming += data
+                
+            elif header == b'\xff':
+                # last fragment
+                incoming += data
+                RecevivedBytes += len(incoming)
+                R.append(incoming)
                 incoming = b''
+                stop_timer = time.monotonic_ns()
+                receving_time += (stop_timer - start_timer)/10^9 
+                print("Packet complete.  timeElapsed: {time}".format(receving_time))
+                
+            elif header == b'\xfd':
+                # small package 
+                incoming += data
+                RecevivedBytes += len(incoming)
+                stop_timer = time.monotonic_ns()
+                receving_time += (stop_timer - start_timer)/10^9 
+                #print("Packet complete. Packet: {info} \n Size: {len}".format(info = scape.bytes_hex(incoming), len = len(incoming)))
+                print("Packet complete.  timeElapsed: {time}".format(receving_time))
+                #print(incoming)
+                
+            # An error occur if we do not account for packets not going through our fragment method. If so, just write it to the tun-interface. 
+            else:
+                
+                tun.write(packet)
 
 def readFromNRF(nrf: RF24):
     size = nrf.getDynamicPayloadSize()
@@ -219,6 +242,10 @@ if __name__ == "__main__":
 
     tx_process.join()
     rx_process.join()
+
+    print("TXThroughput :".format(len(T)*31/transmission_time))
+    print("RXThroughput :".format(RecevivedBytes/receving_time))
+
     # Setting the radios to stop listening seems to be best practice. 
     rx_nrf.stopListening()  
     tx_nrf.stopListening()
