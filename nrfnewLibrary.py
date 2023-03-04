@@ -51,7 +51,7 @@ def fragment(packet, fragmentSize):
     frags = []
     dataRaw = bytes(packet)
     if len(dataRaw) <= sizeExHeader:
-        frags.append('\xfd' + dataRaw)
+        frags.append(b'\xfd' + dataRaw)
     else: 
         numSteps = math.ceil(len(dataRaw)/sizeExHeader)
         for _ in range(1, numSteps + 1):
