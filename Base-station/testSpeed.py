@@ -5,6 +5,7 @@ import time
 from pytun import TunTapDevice
 import scapy.all as scape
 import argparse
+import struct
 from RF24 import RF24, RF24_PA_LOW, RF24_PA_MAX, RF24_2MBPS,RF24_CRC_8
 
 manager = Manager()
@@ -16,11 +17,12 @@ tx_nrf = RF24(27, 10)
 tx_nrf.begin()
 tx_process = Process
 
+transmissionBytes =0
 RecevivedBytes = 0
 T = []
-transmission_time = 0
+transmission_time = 0.0
 R = []
-receving_time = 0
+receving_time = 0.0
 
 def setupNRFModules(args):
     
@@ -57,7 +59,7 @@ def fragment(packet, fragmentSize):
     frags = []
     dataRaw = bytes(packet)
     if len(dataRaw) <= sizeExHeader:
-        frags.append('\xfd' + dataRaw)
+        frags.append(b'\xfd' + dataRaw)
     else: 
         numSteps = math.ceil(len(dataRaw)/sizeExHeader)
         for _ in range(1, numSteps + 1):
@@ -69,29 +71,37 @@ def fragment(packet, fragmentSize):
     return frags
  
 
+def toSecond(floatTime):
+    return floatTime/(10**9)
  
 def tx(nrf: RF24, address, channel, size):
     global transmission_time
+    global transmissionBytes
     nrf.openWritingPipe(address)
     nrf.stopListening()
     print("Init TX on channel {}".format(channel))
     nrf.printDetails()
-    transmission_time = 0
+    transmission_time = 0.0
     while len(T)<2000:
             #print("Size of the queue? {}".format(outgoing.qsize()))
-            start_timer = time.monotonic_ns()   
+              
             #packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
-            packet = transmission_time.to_bytes(31, "big") # may return OverflowError if packet is too big.
             T.append(transmission_time) 
+            packet = struct.pack("!f", transmission_time) 
+            
             print("TX: {}".format(packet)) #TODO: DELETE. 
+            start_timer = time.monotonic_ns() 
             fragments = fragment(packet, size)
             for i in fragments:
                 #print("Fragment in TX: {}".format(scape.bytes_hex(i)))
                 nrf.writeFast(i)
-            end_timer = time.monotonic_ns()
-            transmission_time += (end_timer - start_timer)/10^9 #convert to seconds. 
+                transmissionBytes += len(i)
+            end_timer = time.monotonic_ns()  
+            transmission_time += toSecond(end_timer-start_timer) #convert to seconds. 
             
     print("Tx done, time: {}".format(transmission_time))
+    print("Transmissionbytes:  {}".format(transmissionBytes))
+    print("Throughput: {}".format(transmissionBytes/transmission_time))
         
 
         
@@ -109,13 +119,14 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
         global RecevivedBytes
         hasData, _ = nrf.available_pipe() # Do not care about what pipe the data comes in at. 
         if hasData:
-            start_timer = time.monotonic_ns()
+            
             print("Received packet at  time : {}".format(start_timer))
+            start_timer = time.monotonic_ns()
             packet = readFromNRF(nrf)
             header = packet[0:1]
             data = packet[1:]
             print(scape.bytes_hex(header))
-            
+
             # Checks if the packet received is a fragment, is small enough to not be one, or is the last fragment. 
             if header == b'\xfe':
                 # more  fragments
@@ -128,7 +139,7 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
                 R.append(incoming)
                 incoming = b''
                 stop_timer = time.monotonic_ns()
-                receving_time += (stop_timer - start_timer)/10^9 
+                receving_time += toSecond(stop_timer - start_timer)
                 print("Packet complete.  timeElapsed: {time}".format(receving_time))
                 
             elif header == b'\xfd':
@@ -136,7 +147,7 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
                 incoming += data
                 RecevivedBytes += len(incoming)
                 stop_timer = time.monotonic_ns()
-                receving_time += (stop_timer - start_timer)/10^9 
+                receving_time += toSecond(stop_timer - start_timer) 
                 #print("Packet complete. Packet: {info} \n Size: {len}".format(info = scape.bytes_hex(incoming), len = len(incoming)))
                 print("Packet complete.  timeElapsed: {time}".format(receving_time))
                 #print(incoming)
