@@ -140,7 +140,7 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
                 incoming = b''
                 stop_timer = time.monotonic_ns()
                 receving_time += toSecond(stop_timer - start_timer)
-                print("Packet complete.  timeElapsed: {time}".format(receving_time))
+                print("Packet complete. Data: {}  timeElapsed: {time}".format(int.from_bytes(incoming,"big"),receving_time))
                 
             elif header == b'\xfd':
                 # small package 
@@ -149,7 +149,7 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
                 stop_timer = time.monotonic_ns()
                 receving_time += toSecond(stop_timer - start_timer) 
                 #print("Packet complete. Packet: {info} \n Size: {len}".format(info = scape.bytes_hex(incoming), len = len(incoming)))
-                print("Packet complete.  timeElapsed: {time}".format(receving_time))
+                print("Packet complete. Data: {}  timeElapsed: {time}".format(int.from_bytes(incoming,"big"),receving_time))
                 #print(incoming)
                 
             # An error occur if we do not account for packets not going through our fragment method. If so, just write it to the tun-interface. 
