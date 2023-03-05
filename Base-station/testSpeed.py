@@ -81,7 +81,7 @@ def tx(nrf: RF24, address, channel, size):
     nrf.stopListening()
     print("Init TX on channel {}".format(channel))
     nrf.printDetails()
-    transmission_time = 0.0
+    transmission_time = 0.0000001
     while len(T)<2000:
             #print("Size of the queue? {}".format(outgoing.qsize()))
               
@@ -120,8 +120,8 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
         hasData, _ = nrf.available_pipe() # Do not care about what pipe the data comes in at. 
         if hasData:
             
-            print("Received packet at  time : {}".format(start_timer))
             start_timer = time.monotonic_ns()
+            print("Received packet at  time : {}".format(start_timer))
             packet = readFromNRF(nrf)
             header = packet[0:1]
             data = packet[1:]
