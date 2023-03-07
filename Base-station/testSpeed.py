@@ -76,7 +76,8 @@ def toSecond(floatTime):
  
 def tx(nrf: RF24, address, channel, size):
     global transmission_time
-    global transmissionBytes
+    global transmissionBytes 
+    transmissionBytes=0
     nrf.openWritingPipe(address)
     nrf.stopListening()
     print("Init TX on channel {}".format(channel))
@@ -85,16 +86,19 @@ def tx(nrf: RF24, address, channel, size):
     
     while transmission_time<60:
             #print("Size of the queue? {}".format(outgoing.qsize()))
-              
+            start_timer = time.monotonic_ns() 
             #packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
             T.append(transmission_time) 
-            packet = struct.pack("!f", transmission_time) 
+            #packet = struct.pack("!f", transmission_time) 
+            package = scape.IP(src="20.0.0.1",dst = "20.0.0.2")/scape.UDP()/scape.Raw(load=struct.pack("!f", transmission_time))
+            #package = scape.IP(src="20.0.0.2",dst = "20.0.0.1")/scape.UDP()/scape.Raw(load=struct.pack("!f", transmission_time))
+            print("TX: {}".format(package)) #TODO: DELETE. 
             
-            print("TX: {}".format(packet)) #TODO: DELETE. 
-            start_timer = time.monotonic_ns() 
-            fragments = fragment(packet, size)
+            fragments = fragment(package, size)
+            
             for i in fragments:
                 #print("Fragment in TX: {}".format(scape.bytes_hex(i)))
+                
                 nrf.writeFast(i)
                 transmissionBytes += len(i)
             end_timer = time.monotonic_ns()  
@@ -108,7 +112,9 @@ def tx(nrf: RF24, address, channel, size):
         
             
 def rx(nrf: RF24, address, tun: TunTapDevice, channel):
-    
+    global receving_time 
+    global RecevivedBytes
+    RecevivedBytes=0
     nrf.openReadingPipe(1, address)
     nrf.startListening()
     print("Init RX on channel {}".format(channel))
@@ -116,18 +122,14 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
     incoming = b''
 
     while True:
-        global receving_time
-        global RecevivedBytes
-        hasData, _ = nrf.available_pipe() # Do not care about what pipe the data comes in at. 
+        hasData, _ = nrf.available_pipe() # Do not care about what pipe the data comes in at.
         if hasData:
-            
             start_timer = time.monotonic_ns()
             #print("Received packet at  time : {}".format(start_timer))
             packet = readFromNRF(nrf)
             header = packet[0:1]
             data = packet[1:]
             print(scape.bytes_hex(header))
-
             # Checks if the packet received is a fragment, is small enough to not be one, or is the last fragment. 
             if header == b'\xfe':
                 # more  fragments
