@@ -9,7 +9,7 @@ import struct
 from RF24 import RF24, RF24_PA_LOW, RF24_PA_MAX, RF24_2MBPS,RF24_CRC_8
 
 manager = Manager()
-outgoing = manager.Queue()
+outgoing = manager.Queue(maxsize = 3)
 rx_nrf = RF24(17, 0)
 rx_nrf.begin()
 rx_process = Process
@@ -92,21 +92,17 @@ def tx(nrf: RF24, address, channel, size):
             #packet = struct.pack("!f", transmission_time) 
             
             #package = scape.IP(src="20.0.0.2",dst = "20.0.0.1")/scape.UDP()/scape.Raw(load=struct.pack("!f", transmission_time))
-            #print("TX: {}".format(package)) #TODO: DELETE. 
-            
+            print("TX: {}".format(package)) #TODO: DELETE. 
+            start_timer = time.monotonic_ns() 
             fragments = fragment(package, size)
             for i in fragments:
                 #print("Fragment in TX: {}".format(scape.bytes_hex(i)))
                 nrf.writeFast(i)
                 transmissionBytes += len(i)
-                print(transmissionBytes)
+                
             end_timer = time.monotonic_ns()  
             transmission_time += toSecond(end_timer-start_timer) #convert to seconds. 
-            
-    print("Tx done, time: {}".format(transmission_time))
-    print("Transmissionbytes:  {}".format(transmissionBytes))
-    print("Throughput: {}".format(transmissionBytes/transmission_time))
-        
+            print("Bytes: {}".format(transmissionBytes))
 
         
             
@@ -153,7 +149,9 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
                 RecevivedBytes += len(incoming)
                 stop_timer = time.monotonic_ns()
                 receving_time += toSecond(stop_timer - start_timer)
-                print("RXT: ".format(receving_time))
+                print("RXT: {}".format(receving_time))
+                print("RT Bytes: {}".format(RecevivedBytes))
+                print("RXThroughput {}:".format(RecevivedBytes/receving_time)) 
                  
                 #print("Packet complete. Packet: {info} \n Size: {len}".format(info = scape.bytes_hex(incoming), len = len(incoming)))
                 #print("Packet complete. Data: {}  timeElapsed: {time}".format(int.from_bytes(incoming,"big"),receving_time))
@@ -221,6 +219,17 @@ def createDoubledProcess(isTX):
         return Process(target=tx, kwargs={'nrf':rx_nrf, 'address':bytes(vars['src'], 'utf-8'), 'channel': vars['rx'], 'size':args.size})
     return Process(target=rx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'tun': tun, 'channel': vars['tx']})
 
+def sendPackages(packet,tun):
+    t = 0
+    
+    while t<5:
+        start_timer =time.monotonic_ns()
+        tun.write(scape.raw(packet))
+        #print("Sending packages length: {}".format(len(packet)))
+        stop_timer =time.monotonic_ns()
+        t += toSecond(stop_timer-start_timer)
+        
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='NRF24L01+. Please note that you should use the same src/dst for the base and the mobile unit, put the isBase to False and let the program handle the RX/TX pair.')
     parser.add_argument('--base', dest='base', default=True, action=argparse.BooleanOptionalAction)
@@ -247,27 +256,30 @@ if __name__ == "__main__":
     tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'channel': vars['tx'], 'size':args.size})
     tx_process.start()
 
-  
+    transmission_time = 0.00000000001
+    receving_time = 0.00000000001
+    packet = scape.IP(src="20.0.0.1",dst = "20.0.0.2")/scape.UDP()/scape.Raw(load=struct.pack("!f", 0.0))
+    speedProcess = Process(target = sendPackages, kwargs={'packet': packet,'tun':tun})
+    speedProcess.start()
     
+    print("TXThroughput : {}".format(transmissionBytes/transmission_time))
+    print("RXThroughput :{} ".format(RecevivedBytes/receving_time))
     try:    
-        time = 0.00
-        start_timer = time.monotonic_ns() 
-        while time<60:  
-            package = scape.IP(src="20.0.0.1",dst = "20.0.0.2")/scape.UDP()/scape.Raw(load=struct.pack("!f", transmission_time))  
-            scape.send(packet, iface="longge")
+        while True:  
+            
             packet = tun.read(tun.mtu)
+            
             outgoing.put(packet)
-            end_timer = time.monotonic_ns() 
-            time+=toSecond(end_timer-start_timer)
-            #print("In main thread, size of the queue is: {}".format(outgoing.qsize()))
-        print("TXThroughput : {}".format(transmissionBytes/transmission_time))
-        print("RXThroughput :{} ".format(RecevivedBytes/receving_time))
+            
+            print("In main thread, size of the queue is: {}".format(outgoing.qsize()))
+        
 
     except KeyboardInterrupt:
         print("Main thread no longer listening on the TUN interface. ")
 
     tx_process.join()
     rx_process.join()
+    speedProcess.join()
 
     
     
