@@ -1,22 +1,33 @@
 import math
-from multiprocessing import Process, Manager, Lock
+from multiprocessing import Process, Manager, Lock, Value
+import queue
+import sys
+import threading
 import os
 import time
 from pytun import TunTapDevice
 import scapy.all as scape
 import gzip
+import ctypes
 import argparse
 from RF24 import RF24, RF24_PA_LOW, RF24_PA_MAX, RF24_2MBPS,RF24_CRC_8
 
 
-manager = Manager()
-outgoing = manager.Queue(maxsize=3)
+#manager = Manager()
+#outgoing = manager.Queue(maxsize=3)
+outgoing = queue.Queue()
+test = queue.Queue(maxsize = 1)
+
+
 rx_nrf = RF24(17, 0)
 rx_nrf.begin()
-rx_process = Process
+
 tx_nrf = RF24(27, 10)
 tx_nrf.begin()
-tx_process = Process
+
+rxEvent = threading.Event()
+txEvent = threading.Event()
+whichToDouble = Value(ctypes.c_char_p, b"")
 
 def setupNRFModules(args):
     
@@ -84,16 +95,22 @@ def tx(nrf: RF24, address, channel, size):
     print("Init TX on channel {}".format(channel))
     nrf.printDetails()
     while True:
-            packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
-            print("TX: {}".format(packet)) #TODO: DELETE. 
-            fragments = fragment(packet, size)
-            # Making sure we only check small packets for double speed-mode. 
-            if len(fragments) == 1 and activateDouble(fragments[0]):
-                ttl = int.from_bytes(fragments[0][-2:], 'big')                
-                doubleTX(ttl)
-            for i in fragments:
-                #print("Fragment in TX: {}".format(scape.bytes_hex(i)))
-                nrf.write(i)
+        if txEvent.isSet():
+            break
+        packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
+        if packet == None:
+            break
+        print("TX: {}".format(packet)) #TODO: DELETE. 
+        fragments = fragment(packet, size)
+        # Making sure we only check small packets for double speed-mode. 
+        if len(fragments) == 1 and activateDouble(fragments[0]):
+            ttl = int.from_bytes(fragments[0][-2:], 'big')                
+            doubleTX(ttl)
+        for i in fragments:
+            #print("Fragment in TX: {}".format(scape.bytes_hex(i)))
+            nrf.write(i)
+        
+
 
 def activateDouble(bytes) -> bool:
     return bytes[-7:-2] == b'\xff\xff\xff\xff\xff'
@@ -107,7 +124,7 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
 
     while True:
         hasData, _ = nrf.available_pipe() # Do not care about what pipe the data comes in at. 
-        if hasData:
+        if hasData and rxEvent.is_set():
             packet = readFromNRF(nrf)
             # Here we need to check every packet for the required speed mode. This could slow down normal operations by a lot. Would need further testing. 
             if activateDouble(packet):
@@ -136,6 +153,8 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
             # An error occur if we do not account for packets not going through our fragment method. If so, just write it to the tun-interface. 
             else:
                 tun.write(packet)
+        if rxEvent.is_set():
+            break
 
 def readFromNRF(nrf: RF24):
     size = nrf.getDynamicPayloadSize()
@@ -164,40 +183,110 @@ def setupIP(isBase):
     print("TUN interface online, with values \n Address:  {} \n Destination: {} \n Network mask: {}".format(tun.addr, tun.dstaddr, tun.netmask) )
     return tun
 
+
 def doubleTX(timeToLive):
     print("Activating doubleTX for {} {}".format(timeToLive, "minute" if timeToLive == 1 else "minutes"))
-    Process(target=doubleProcess, args=(timeToLive, rx_process)).start()
+    rxEvent.set()
+    test.put("T" + str(timeToLive))
+
 def doubleRX(timeToLive):
     print("Activating doubleRX for {} {}".format(timeToLive, "minute" if timeToLive == 1 else "minutes"))
-    Process(target=doubleProcess, args=(timeToLive, tx_process)).start()
+    txEvent.set()
+    test.put("R" + str(timeToLive))
 
-
+"""
 # The NRF process this takes in is the one to kill. 
-lock = Lock()
 def doubleProcess(timeToLive, nrf_process: Process):
-    lock.acquire()
     # Ensure that no module is expecting ACKs.
     rx_nrf.setAutoAck(False)
     tx_nrf.setAutoAck(False)
+    isTX = nrf_process is tx_process
     nrf_process.kill()
     print("Successfully shut down old operation. Starting new.".format(nrf_process))
-     # Since we want the pairs to work together, we need to set the new tx to use the old RX values. 
-    new_process = createDoubledProcess(nrf_process is tx_process)
-    new_process.start()
-    print("Letting this manager thread sleep for {} {}".format(timeToLive, "minute" if timeToLive == 1 else "minutes"))
-    time.sleep(timeToLive * 600) # Supposed to be * 60. Is not currently for testing-purposes. 
- 
-    #new_process.kill()
-    #new_process.join()
-    print("Time expired, recreating old process.")
-    old_process = createDoubledProcess(nrf_process is not tx_process)
-    old_process.start()
-    lock.release()
+    # If we kill the TX process, we want to start a new RX process.
+    if isTX:
+        temp = Process(target=rx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'tun': tun, 'channel': vars['tx']}) 
+        temp.start()
+        time.sleep(timeToLive)
+        print("Time expired, recreating old process.")
 
-def createDoubledProcess(isTX):
-    if not isTX:
-        return Process(target=tx, kwargs={'nrf':rx_nrf, 'address':bytes(vars['src'], 'utf-8'), 'channel': vars['rx'], 'size':args.size})
-    return Process(target=rx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'tun': tun, 'channel': vars['tx']})
+        temp.kill()
+        temp.join()
+
+        # Restart the tx_process.
+        tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'channel': vars['tx'], 'size':args.size})
+        tx_process.start()
+    elif not isTX:
+        temp = Process(target=tx, kwargs={'nrf':rx_nrf, 'address':bytes(vars['src'], 'utf-8'), 'channel': vars['rx'], 'size':args.size})
+        temp.start()
+        time.sleep(timeToLive)
+        print("Time expired, recreating old process.")
+
+        temp.kill()
+        temp.join()
+
+        # Restart the rx_process.
+        rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(vars['src'], 'utf-8'), 'tun': tun, 'channel': vars['rx']})
+        rx_process.start()
+    else:
+        raise Exception("Unknown process. Need to know which of the two is supposed to be killed.")
+#    new_process = createDoubledProcess(nrf_process is tx_process)
+ #   new_process.start()
+    print("Letting this manager thread sleep for {} {}".format(timeToLive, "minute" if timeToLive == 1 else "minutes"))
+  #  time.sleep(timeToLive) # Supposed to be * 60. Is not currently for testing-purposes. 
+ 
+   # new_process.kill()
+    #new_process.join()
+    #old_process = createDoubledProcess(nrf_process is not tx_process)
+    #old_process.start()
+    
+"""
+def init(vars, tun):
+    rxEvent.clear()
+    txEvent.clear()
+    rx_process = threading.Thread(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(vars['src'], 'utf-8'), 'tun': tun, 'channel': vars['rx']})
+    rx_process.start()
+    time.sleep(0.001)
+
+    tx_process = threading.Thread(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'channel': vars['tx'], 'size':args.size})
+    tx_process.start()
+    return rx_process, tx_process
+def manageProcesses(vars, tun):
+    rx_process, tx_process = init(vars, tun)
+    while True:
+        a = test.get()
+        print("I'm up I'm up")
+        #val = whichToDouble.value[0]
+        #howLong = int.from_bytes(whichToDouble.value[1:], 'big')
+        print(a)
+        val = a[0]
+        howLong = int(a[1:])
+        if val == "T":
+            rx_process.join()
+            tx2 = Process(target=tx, kwargs={'nrf':rx_nrf, 'address':bytes(vars['src'], 'utf-8'), 'channel': vars['rx'], 'size':args.size})
+            tx2.start()
+            time.sleep(howLong)
+            txEvent.set()
+            print("Set the TX event flag, now the tx threads should fall in line.")
+            tx2.join()
+            print("At least one did.")
+            tx_process.join()
+            print("This one should not")
+            print("???")            
+        elif val == "R":
+            tx_process.join()
+            rx2 = threading.Thread(target=rx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'tun': tun, 'channel': vars['tx']})
+            rx2.start()
+            time.sleep(howLong)
+            rxEvent.set()
+            rx2.join()
+            txEvent.clear()
+            rxEvent.clear()
+            tx_process = threading.Thread(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'channel': vars['tx'], 'size':args.size})
+            tx_process.start()
+        else:
+            raise Exception("How did you get here? Unexpected wakeup, value not set.")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='NRF24L01+. Please note that you should use the same src/dst for the base and the mobile unit, put the isBase to False and let the program handle the RX/TX pair.')
@@ -216,14 +305,11 @@ if __name__ == "__main__":
     # Setup of NRF modules, channels, and the Tun interface. 
     vars = setupNRFModules(args)
     tun = setupIP(args.base)
-   
-    rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(vars['src'], 'utf-8'), 'tun': tun, 'channel': vars['rx']})
-    rx_process.start()
-    time.sleep(0.01)
+    processHandler = threading.Thread(target=manageProcesses, args=(vars, tun))
+    processHandler.start()
+    #rx_process.start()
+    #time.sleep(0.01)
 
-    tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'channel': vars['tx'], 'size':args.size})
-    tx_process.start()
-    
     try:    
         while True:    
             packet = tun.read(tun.mtu)
@@ -231,12 +317,11 @@ if __name__ == "__main__":
 
     except KeyboardInterrupt:
         print("Main thread no longer listening on the TUN interface. ")
-
-    tx_process.join()
-    rx_process.join()
+    processHandler.join()
     # Setting the radios to stop listening seems to be best practice. 
     rx_nrf.stopListening()  
     tx_nrf.stopListening()
     tun.down()
     
     print("Threads ended, radios stopped listening, TUN interface down.")
+    quit()
