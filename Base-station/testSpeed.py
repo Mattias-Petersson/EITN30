@@ -22,7 +22,7 @@ RecevivedBytes = 0
 T = []
 transmission_time = 0.0
 R = []
-receving_time = 0.0
+receving_time = 0.0000001
 
 def setupNRFModules(args):
     
@@ -82,7 +82,8 @@ def tx(nrf: RF24, address, channel, size):
     print("Init TX on channel {}".format(channel))
     nrf.printDetails()
     transmission_time = 0.0000001
-    while len(T)<2000:
+    
+    while transmission_time<60:
             #print("Size of the queue? {}".format(outgoing.qsize()))
               
             #packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
@@ -121,7 +122,7 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
         if hasData:
             
             start_timer = time.monotonic_ns()
-            print("Received packet at  time : {}".format(start_timer))
+            #print("Received packet at  time : {}".format(start_timer))
             packet = readFromNRF(nrf)
             header = packet[0:1]
             data = packet[1:]
@@ -140,22 +141,27 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
                 incoming = b''
                 stop_timer = time.monotonic_ns()
                 receving_time += toSecond(stop_timer - start_timer)
-                print("Packet complete. Data: {}  timeElapsed: {time}".format(int.from_bytes(incoming,"big"),receving_time))
+                print("RXT: {}".format(receving_time))
+                print("RT Bytes: {}".format(RecevivedBytes))
+                print("RXThroughput {}:".format(RecevivedBytes/receving_time)) 
                 
             elif header == b'\xfd':
                 # small package 
                 incoming += data
                 RecevivedBytes += len(incoming)
                 stop_timer = time.monotonic_ns()
-                receving_time += toSecond(stop_timer - start_timer) 
+                receving_time += toSecond(stop_timer - start_timer)
+                print("RXT: ".format(receving_time))
+                print("RXThroughput :".format(RecevivedBytes/receving_time)) 
                 #print("Packet complete. Packet: {info} \n Size: {len}".format(info = scape.bytes_hex(incoming), len = len(incoming)))
-                print("Packet complete. Data: {}  timeElapsed: {time}".format(int.from_bytes(incoming,"big"),receving_time))
+                #print("Packet complete. Data: {}  timeElapsed: {time}".format(int.from_bytes(incoming,"big"),receving_time))
                 #print(incoming)
                 
             # An error occur if we do not account for packets not going through our fragment method. If so, just write it to the tun-interface. 
             else:
                 
                 tun.write(packet)
+                   
 
 def readFromNRF(nrf: RF24):
     size = nrf.getDynamicPayloadSize()
@@ -255,7 +261,7 @@ if __name__ == "__main__":
     rx_process.join()
 
     print("TXThroughput :".format(len(T)*31/transmission_time))
-    print("RXThroughput :".format(RecevivedBytes/receving_time))
+    
 
     # Setting the radios to stop listening seems to be best practice. 
     rx_nrf.stopListening()  
