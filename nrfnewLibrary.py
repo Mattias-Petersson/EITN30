@@ -1,14 +1,16 @@
-from collections import defaultdict
 import math
 from multiprocessing import Process, Manager, Lock
 import os
 import time
 from pytun import TunTapDevice
 import scapy.all as scape
+import gzip
 import argparse
 from RF24 import RF24, RF24_PA_LOW, RF24_PA_MAX, RF24_2MBPS,RF24_CRC_8
+
+
 manager = Manager()
-outgoing = manager.Queue()
+outgoing = manager.Queue(maxsize=3)
 rx_nrf = RF24(17, 0)
 rx_nrf.begin()
 rx_process = Process
@@ -47,60 +49,72 @@ def fragment(packet, fragmentSize):
     """ Fragments and returns a list of bytes. This is done by finding the number of fragments we want, and then splitting the bytes-like object into chunks of appropriate size. 
     The input parameter is an IP packet (or any bytes-like object) and the size the method should fragment these into.  
     """
-    sizeExHeader = fragmentSize - 1 # This is very likely to always be 32 - 3. However, it does not hurt to future proof this method in case of size changes in radio MTU.
+    sizeExHeader = fragmentSize - 1 # This is very likely to vary on implementation of fragmentation.
     frags = []
     dataRaw = bytes(packet)
+    fragmented = False
     if len(dataRaw) <= sizeExHeader:
         frags.append(b'\xfd' + dataRaw)
-    else: 
-        numSteps = math.ceil(len(dataRaw)/sizeExHeader)
-        for _ in range(1, numSteps + 1):
-            data = b'\xfe' + dataRaw[0:sizeExHeader]
-            frags.append(data)
-            dataRaw = dataRaw[sizeExHeader:]
-    
-    frags[-1] = b'\xff' + frags[-1][1:] # Set the last fragment to be the identifier of a finished packet. 
+    elif len(dataRaw) >= 1270: # Size selected due to compression efficiency, see the plot in the associated test-folder.
+        # Compress the payload ONLY, not the IP header.  
+        compressedPayload = gzip.compress(dataRaw[20:])
+        frags = fragmentHelper(dataRaw[0:20] + compressedPayload, sizeExHeader)
+        fragmented = True
+    else:
+        frags = fragmentHelper(dataRaw, sizeExHeader) 
+
+    identifier = b'\xff' if not fragmented else b'\xfc'
+    frags[-1] = identifier + frags[-1][1:] # Set the last fragment to be the identifier of a finished packet. 
     return frags
- 
+
+
+def fragmentHelper(data, size) -> list:
+    tempList = []
+    steps = math.ceil(len(data) / size)
+    for _ in range(steps):
+        data = b'\xfe' + data[0:size]
+        tempList.append(data)
+        data = data[size:]
+    return tempList
+
+
 def tx(nrf: RF24, address, channel, size):
     nrf.openWritingPipe(address)
     nrf.stopListening()
     print("Init TX on channel {}".format(channel))
     nrf.printDetails()
     while True:
-            #print("Size of the queue? {}".format(outgoing.qsize()))
             packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
             print("TX: {}".format(packet)) #TODO: DELETE. 
             fragments = fragment(packet, size)
             # Making sure we only check small packets for double speed-mode. 
             if len(fragments) == 1 and activateDouble(fragments[0]):
-                print("Not supposed to get here TX")
-                #doubleTX(int.from_bytes(fragments[0][-1:]))
+                ttl = int.from_bytes(fragments[0][-2:], 'big')                
+                doubleTX(ttl)
             for i in fragments:
                 #print("Fragment in TX: {}".format(scape.bytes_hex(i)))
                 nrf.write(i)
 
-def activateDouble(bytes):
-    return bytes[-6:-1] == b'\xff\xff\xff\xff\xff'
+def activateDouble(bytes) -> bool:
+    return bytes[-7:-2] == b'\xff\xff\xff\xff\xff'
 
 def rx(nrf: RF24, address, tun: TunTapDevice, channel):
     nrf.openReadingPipe(1, address)
     nrf.startListening()
     print("Init RX on channel {}".format(channel))
     nrf.printDetails()
- 
     incoming = b''
+
     while True:
         hasData, _ = nrf.available_pipe() # Do not care about what pipe the data comes in at. 
         if hasData:
             packet = readFromNRF(nrf)
+            # Here we need to check every packet for the required speed mode. This could slow down normal operations by a lot. Would need further testing. 
             if activateDouble(packet):
-                print("Not supposed to get here RX")
-                #doubleRX(int.from_bytes(packet[-1:]))
+                ttl = int.from_bytes(packet[-2:], 'big')
+                doubleRX(ttl)
             fragments = packet[0:1]
             remainingPacket = packet[1:]
-
-
 
             # Checks if the packet received is a fragment, is small enough to not be one, or is the last fragment. 
             if fragments == b'\xfe':
@@ -114,21 +128,15 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
             elif fragments == b'\xfd':
                 # size are less than 31 bytes
                 tun.write(remainingPacket)
+            elif fragments == b'\xfc':
+                # Last fragment, compressed.
+                incoming += remainingPacket
+                dataRaw = gzip.decompress(incoming[20:])
+                tun.write(incoming[0:20] + dataRaw)
             # An error occur if we do not account for packets not going through our fragment method. If so, just write it to the tun-interface. 
             else:
-                #tun.write(fragments+packet)
                 tun.write(packet)
 
-            """
-            dict[scape.bytes_hex(header)] += 1
-            print(sorted(dict.items(), key = lambda x: x[1], reverse=True))
-
-            incoming += packet[3:]
-            if header == b'\x00\x00':
-                tun.write(incoming)
-                print("Packet complete. Packet: {info} \n Size: {len}".format(info = scape.bytes_hex(incoming), len = len(incoming)))
-                incoming = b''
-"""
 def readFromNRF(nrf: RF24):
     size = nrf.getDynamicPayloadSize()
     tmp = nrf.read(size)
@@ -156,10 +164,11 @@ def setupIP(isBase):
     print("TUN interface online, with values \n Address:  {} \n Destination: {} \n Network mask: {}".format(tun.addr, tun.dstaddr, tun.netmask) )
     return tun
 
-
 def doubleTX(timeToLive):
+    print("Activating doubleTX for {} {}".format(timeToLive, "minute" if timeToLive == 1 else "minutes"))
     Process(target=doubleProcess, args=(timeToLive, rx_process)).start()
 def doubleRX(timeToLive):
+    print("Activating doubleRX for {} {}".format(timeToLive, "minute" if timeToLive == 1 else "minutes"))
     Process(target=doubleProcess, args=(timeToLive, tx_process)).start()
 
 
@@ -167,24 +176,26 @@ def doubleRX(timeToLive):
 lock = Lock()
 def doubleProcess(timeToLive, nrf_process: Process):
     lock.acquire()
+    # Ensure that no module is expecting ACKs.
+    rx_nrf.setAutoAck(False)
+    tx_nrf.setAutoAck(False)
     nrf_process.kill()
-    nrf_process.join()
     print("Successfully shut down old operation. Starting new.".format(nrf_process))
      # Since we want the pairs to work together, we need to set the new tx to use the old RX values. 
-    new_process = createDoubledProcess(nrf_process is not tx_process)
+    new_process = createDoubledProcess(nrf_process is tx_process)
     new_process.start()
-    print("Letting this manager thread sleep for {} seconds".format(timeToLive))
-    time.sleep(timeToLive)
+    print("Letting this manager thread sleep for {} {}".format(timeToLive, "minute" if timeToLive == 1 else "minutes"))
+    time.sleep(timeToLive * 600) # Supposed to be * 60. Is not currently for testing-purposes. 
  
-    new_process.kill()
-    new_process.join()
+    #new_process.kill()
+    #new_process.join()
     print("Time expired, recreating old process.")
-    old_process = createDoubledProcess(nrf_process is tx_process)
+    old_process = createDoubledProcess(nrf_process is not tx_process)
     old_process.start()
     lock.release()
 
-def createDoubledProcess(double_output):
-    if(double_output):
+def createDoubledProcess(isTX):
+    if not isTX:
         return Process(target=tx, kwargs={'nrf':rx_nrf, 'address':bytes(vars['src'], 'utf-8'), 'channel': vars['rx'], 'size':args.size})
     return Process(target=rx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'tun': tun, 'channel': vars['tx']})
 
@@ -198,7 +209,6 @@ if __name__ == "__main__":
     parser.add_argument('--rxchannel', dest='rxchannel', type=int, default=103, help='Rx channel', choices=range(0,125))
     
     args = parser.parse_args()
-
     #With a data rate of 2 Mbps, we need to at least tell the user that the channels should be at least 2Mhz from each other to ensure no cross talk. 
     if abs(args.txchannel - args.rxchannel) < 2:
         print("Do note that having tx and rx channels this close to each other can introduce cross-talk.")
@@ -217,9 +227,7 @@ if __name__ == "__main__":
     try:    
         while True:    
             packet = tun.read(tun.mtu)
-            outgoing.put(packet)
-            print("In main thread, size of the queue is: {}".format(outgoing.qsize()))
-
+            outgoing.put(packet, timeout=1)
 
     except KeyboardInterrupt:
         print("Main thread no longer listening on the TUN interface. ")
@@ -229,7 +237,6 @@ if __name__ == "__main__":
     # Setting the radios to stop listening seems to be best practice. 
     rx_nrf.stopListening()  
     tx_nrf.stopListening()
-    outgoing.close()
     tun.down()
     
     print("Threads ended, radios stopped listening, TUN interface down.")
