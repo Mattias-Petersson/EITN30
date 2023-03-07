@@ -75,32 +75,31 @@ def toSecond(floatTime):
     return floatTime/(10**9)
  
 def tx(nrf: RF24, address, channel, size):
+    global transmissionBytes
     global transmission_time
-    global transmissionBytes 
     transmissionBytes=0
     nrf.openWritingPipe(address)
     nrf.stopListening()
     print("Init TX on channel {}".format(channel))
     nrf.printDetails()
-    transmission_time = 0.0000001
+    transmission_time = 0.0
     
-    while transmission_time<60:
+    while True:
             #print("Size of the queue? {}".format(outgoing.qsize()))
-            start_timer = time.monotonic_ns() 
-            #packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
-            T.append(transmission_time) 
+            
+            #packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes. 
+            package = outgoing.get(True)
             #packet = struct.pack("!f", transmission_time) 
-            package = scape.IP(src="20.0.0.1",dst = "20.0.0.2")/scape.UDP()/scape.Raw(load=struct.pack("!f", transmission_time))
+            
             #package = scape.IP(src="20.0.0.2",dst = "20.0.0.1")/scape.UDP()/scape.Raw(load=struct.pack("!f", transmission_time))
-            print("TX: {}".format(package)) #TODO: DELETE. 
+            #print("TX: {}".format(package)) #TODO: DELETE. 
             
             fragments = fragment(package, size)
-            
             for i in fragments:
                 #print("Fragment in TX: {}".format(scape.bytes_hex(i)))
-                
                 nrf.writeFast(i)
                 transmissionBytes += len(i)
+                print(transmissionBytes)
             end_timer = time.monotonic_ns()  
             transmission_time += toSecond(end_timer-start_timer) #convert to seconds. 
             
@@ -120,12 +119,13 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
     print("Init RX on channel {}".format(channel))
     nrf.printDetails()
     incoming = b''
-
+    start_timer = time.monotonic_ns()
     while True:
         hasData, _ = nrf.available_pipe() # Do not care about what pipe the data comes in at.
+        
         if hasData:
-            start_timer = time.monotonic_ns()
-            #print("Received packet at  time : {}".format(start_timer))
+            start_timer = time.monotonic_ns()  
+            
             packet = readFromNRF(nrf)
             header = packet[0:1]
             data = packet[1:]
@@ -154,7 +154,7 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
                 stop_timer = time.monotonic_ns()
                 receving_time += toSecond(stop_timer - start_timer)
                 print("RXT: ".format(receving_time))
-                print("RXThroughput :".format(RecevivedBytes/receving_time)) 
+                 
                 #print("Packet complete. Packet: {info} \n Size: {len}".format(info = scape.bytes_hex(incoming), len = len(incoming)))
                 #print("Packet complete. Data: {}  timeElapsed: {time}".format(int.from_bytes(incoming,"big"),receving_time))
                 #print(incoming)
@@ -247,14 +247,21 @@ if __name__ == "__main__":
     tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'channel': vars['tx'], 'size':args.size})
     tx_process.start()
 
-    ICMPPacket = scape.IP(dst="8.8.8.8")/scape.ICMP() # Merely for testing. Remove later. 
+  
     
     try:    
-        while True:    
+        time = 0.00
+        start_timer = time.monotonic_ns() 
+        while time<60:  
+            package = scape.IP(src="20.0.0.1",dst = "20.0.0.2")/scape.UDP()/scape.Raw(load=struct.pack("!f", transmission_time))  
+            scape.send(packet, iface="longge")
             packet = tun.read(tun.mtu)
             outgoing.put(packet)
-            print("In main thread, size of the queue is: {}".format(outgoing.qsize()))
-
+            end_timer = time.monotonic_ns() 
+            time+=toSecond(end_timer-start_timer)
+            #print("In main thread, size of the queue is: {}".format(outgoing.qsize()))
+        print("TXThroughput : {}".format(transmissionBytes/transmission_time))
+        print("RXThroughput :{} ".format(RecevivedBytes/receving_time))
 
     except KeyboardInterrupt:
         print("Main thread no longer listening on the TUN interface. ")
@@ -262,7 +269,7 @@ if __name__ == "__main__":
     tx_process.join()
     rx_process.join()
 
-    print("TXThroughput :".format(len(T)*31/transmission_time))
+    
     
 
     # Setting the radios to stop listening seems to be best practice. 
