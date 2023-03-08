@@ -8,7 +8,6 @@ import time
 from pytun import TunTapDevice
 import scapy.all as scape
 import gzip
-import ctypes
 import argparse
 from RF24 import RF24, RF24_PA_LOW, RF24_PA_MAX, RF24_2MBPS,RF24_CRC_8
 
@@ -27,7 +26,6 @@ tx_nrf.begin()
 
 rxEvent = threading.Event()
 txEvent = threading.Event()
-#whichToDouble = Value(ctypes.c_char_p, b"")
 
 def setupNRFModules(args):
     
@@ -95,11 +93,7 @@ def tx(nrf: RF24, address, channel, size):
     print("Init TX on channel {}".format(channel))
     nrf.printDetails()
     while True:
-        if txEvent.isSet():
-            break
         packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
-        if packet == None:
-            break
         print("TX: {}".format(packet)) #TODO: DELETE. 
         fragments = fragment(packet, size)
         # Making sure we only check small packets for double speed-mode. 
@@ -211,6 +205,8 @@ def manageProcesses(vars, tun):
     rx_process, tx_process = init(vars, tun)
     while True:
         a = test.get()
+        rx_nrf.setAutoAck(False)
+        tx_nrf.setAutoAck(False)
         print("I'm up I'm up")
         #val = whichToDouble.value[0]
         #howLong = int.from_bytes(whichToDouble.value[1:], 'big')
@@ -221,6 +217,8 @@ def manageProcesses(vars, tun):
             rx_process.join()
             tx2 = Process(target=tx, kwargs={'nrf':rx_nrf, 'address':bytes(vars['src'], 'utf-8'), 'channel': vars['rx'], 'size':args.size})
             tx2.start()
+            print("Successful start of two TX-threads.")
+            """
             time.sleep(howLong)
             txEvent.set()
             print("Set the TX event flag, now the tx threads should fall in line.")
@@ -228,11 +226,15 @@ def manageProcesses(vars, tun):
             print("At least one did.")
             tx_process.join()
             print("This one should not")
-            print("???")            
+            print("???")
+            """            
         elif val == "R":
             tx_process.join()
             rx2 = threading.Thread(target=rx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'tun': tun, 'channel': vars['tx']})
             rx2.start()
+            print("Successful start of two RX-threads.")
+
+            """
             time.sleep(howLong)
             rxEvent.set()
             rx2.join()
@@ -240,6 +242,7 @@ def manageProcesses(vars, tun):
             rxEvent.clear()
             tx_process = threading.Thread(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'channel': vars['tx'], 'size':args.size})
             tx_process.start()
+            """
         else:
             raise Exception("How did you get here? Unexpected wakeup, value not set.")
 
