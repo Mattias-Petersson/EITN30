@@ -91,15 +91,12 @@ def tx(nrf: RF24, address, channel, size):
     while True:
         packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
         print("TX: {} \n Len: {}".format(packet, len(packet))) #TODO: DELETE. 
-        if len(packet) <= 70:
-            if packet[-4:-1] == b'\xff\xff\xff':
-                ttl = packet[-1:]
-                doubleTX(ttl)
-            nrf.write(packet)
-        else:
-            fragments = fragment(packet, size)
-            for i in fragments:
-                nrf.write(i)
+        if len(packet) <= 70 and packet[-4:-1] == b'\xff\xff\xff':
+            ttl = packet[-1:]
+            doubleTX(ttl)
+        fragments = fragment(packet, size)
+        for i in fragments:
+            nrf.write(i)
 
     
 def rx(nrf: RF24, address, tun: TunTapDevice, channel):
