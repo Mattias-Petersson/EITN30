@@ -12,9 +12,7 @@ def ping(IP):
 def arbSend(p):
     scape.send(p, iface="longge")
 
-def testtest() -> tuple[str, str, int]:
-    print("Hey")
 def testTurboTX():
-    packet = scape.IP(src="20.0.0.2", dst="20.0.0.1")/scape.UDP()/b'\xff\xff\xff'
+    packet = scape.IP(src="20.0.0.2", dst="20.0.0.1")/scape.UDP()/(b'\xff\xff\xff\x01')
     print(len(packet))
     scape.send(packet, iface="longge")

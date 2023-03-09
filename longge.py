@@ -22,39 +22,65 @@ rxEvent = Event()
 txEvent = Event()
 
 
+def setupNRFModules(args):
+    
+    rx_nrf.setDataRate(RF24_2MBPS) 
+    tx_nrf.setDataRate(RF24_2MBPS)
+
+    rx_nrf.setAutoAck(True)
+    tx_nrf.setAutoAck(True)
+
+    rx_nrf.payloadSize = 32
+    tx_nrf.payloadSize = 32
+
+    rx_nrf.setCRCLength(RF24_CRC_8)
+    tx_nrf.setCRCLength(RF24_CRC_8)
+
+    #Low power because we are using them next to one another! 
+
+    rx_nrf.setPALevel(RF24_PA_LOW) 
+    tx_nrf.setPALevel(RF24_PA_LOW)
+    return {
+    'src': args.src if args.base else args.dst,
+    'rx': args.rxchannel if args.base else args.txchannel,
+    'dst':  args.dst if args.base else args.src,
+    'tx': args.txchannel if args.base else args.rxchannel
+}
+
+def setupIP(isBase):
+    ipBase = '20.0.0.1'
+    ipMobile = '20.0.0.2'
+    tun = TunTapDevice()
+    tun = TunTapDevice(name='longge')
+    tun.addr = ipBase if isBase else ipMobile
+    tun.dstaddr = ipMobile if isBase else ipBase
+    tun.netmask = '255.255.255.252' # /30
+    tun.mtu = 1500
+    tun.up()
+    print("TUN interface online, with values \n Address:  {} \n Destination: {} \n Network mask: {}".format(tun.addr, tun.dstaddr, tun.netmask) )
+    return tun
+
+#Fragments and returns a list of bytes. The packet of a size > 1270 bytes is assumed to be an IP packet with a minimal header (20b header, 1250b payload).
+# This method also adds one byte of overhead to determine if a packet was fragmented or not. 
 def fragment(packet, fragmentSize):
-
-    """ Fragments and returns a list of bytes. This is done by finding the number of fragments we want, and then splitting the bytes-like object into chunks of appropriate size. 
-    The input parameter is an IP packet (or any bytes-like object) and the size the method should fragment these into.  
-    """
-    sizeExHeader = fragmentSize - 2
+    sizeExHeader = fragmentSize - 1
     frags = []
-    dataRaw = bytes(packet)
-    if len(dataRaw) <= sizeExHeader:
-        data = appendIndex(dataRaw, 0)
-        frags.append(data)
-    else: 
-        numSteps = math.ceil(len(dataRaw)/sizeExHeader)
-        for i in range(1, numSteps + 1):
-            data = appendIndex(dataRaw[0:sizeExHeader], i)
-            frags.append(data)
-            dataRaw = dataRaw[sizeExHeader:]
-
-    frags[-1] = b'\x00\x00' + frags[-1][2:] # Set the last fragment to be the identifier of a finished packet. 
+    if len(packet) <= 1270:
+        numSteps = math.ceil(len(packet) / sizeExHeader)
+        for _ in range(numSteps):
+            frag = b'\x02' + packet[0:sizeExHeader]
+            frags.append(frag)
+            packet = packet[sizeExHeader:]
+        frags[-1] = b'\x00' + frags[-1][1:]
+    else:
+        dataCompressed = packet[0:20] + gzip.compress(packet[20:])
+        numSteps = math.ceil(len(dataCompressed) / sizeExHeader)
+        for _ in range(numSteps):
+            frag = b'\x02' + packet[0:sizeExHeader]
+            frags.append(frag)
+            packet = packet[sizeExHeader:]
+        frags[-1] = b'\x01' + frags[-1][1:]
     return frags
-
-def appendIndex(data, index):
-    indexBytes = index.to_bytes(2, 'big')
-    return indexBytes + data
-
-def fragmentHelper(data, size) -> list:
-    tempList = []
-    steps = math.ceil(len(data) / size)
-    for _ in range(steps):
-        data = b'\xfe' + data[0:size]
-        tempList.append(data)
-        data = data[size:]
-    return tempList
 
 
 def tx(nrf: RF24, address, channel, size):
@@ -62,52 +88,50 @@ def tx(nrf: RF24, address, channel, size):
     nrf.stopListening()
     print("Init TX on channel {}".format(channel))
     nrf.printDetails()
-    currentTime = time.monotonic()
-    while (time.monotonic() - currentTime) < 1000:
+    while True:
         packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
-        #print("TX: {}".format(packet)) #TODO: DELETE. 
-        fragments = fragment(packet, size)
-        # Making sure we only check small packets for double speed-mode. 
-        if len(fragments) == 1 and activateDouble(fragments[0]):
-            #ttl = fragments[0][-2:]
-            nrf.write(b'\xff\xff\xff')                
-            doubleTX()
+        print("TX: {} \n Len: {}".format(packet, len(packet))) #TODO: DELETE. 
+        if len(packet) <= 70:
+            if packet[-4:-1] == b'\xff\xff\xff':
+                ttl = packet[-1:]
+                doubleTX(ttl)
+            nrf.write(packet)
         else:
+            fragments = fragment(packet, size)
             for i in fragments:
-            #print("Fragment in TX: {}".format(scape.bytes_hex(i)))
-            #print(i)
                 nrf.write(i)
-        if txEvent.is_set():
-            break
-        print("spamTX")
 
-def activateDouble(bytes) -> bool:
-    return bytes[4:7] == b'\xff\xff\xff'
-        
+    
 def rx(nrf: RF24, address, tun: TunTapDevice, channel):
     nrf.openReadingPipe(1, address)
     nrf.startListening()
     print("Init RX on channel {}".format(channel))
     nrf.printDetails()
     incoming = b''
-    currentTime = time.monotonic()
-    while (time.monotonic() - currentTime) < 1000:
+    #currentTime = time.monotonic()
+    #while (time.monotonic() - currentTime) < 1000:
+    while True:
         hasData, _ = nrf.available_pipe()
         if hasData:
             packet = readFromNRF(nrf)
-            print(packet)
-            if activateDouble(packet):
-                #ttl = packet[-2:]
-                doubleRX()
-            incoming += packet[2:]
+            print("RX: {}".format(packet))
+            if packet[2:5] == b'\xff\xff\xff':
+                ttl = packet[5:6]
+                doubleRX(ttl)
+            incoming += packet[1:]
             #print("Packet index: {}".format(packet[0:2]))
             
-            if packet[0:2] == b'\x00\x00':
+            if packet[0:1] == b'\x00':
                 #print("Packet complete. Packet: {info} \n Size: {len}".format(info = scape.bytes_hex(incoming), len = len(incoming)))
                 tun.write(incoming)
                 incoming = b''
-        if rxEvent.is_set():
-            break
+            elif packet[0:1] == b'\x01':
+                decompressedData = incoming[0:20] + gzip.decompress(incoming[20:])
+                tun.write(decompressedData)
+                incoming = b''
+            #else: 
+            #    tun.write(incoming)
+
 """
             packet = readFromNRF(nrf)
             if activateDouble(packet):
@@ -142,55 +166,17 @@ def readFromNRF(nrf: RF24):
     tmp = nrf.read(size)
     return bytes(tmp)
             
-def setupNRFModules(args):
+
+def activateDouble(bytes) -> bool:
+    return bytes[-4:-1] == b'\xff\xff\xff'
     
-    rx_nrf.setDataRate(RF24_2MBPS) 
-    tx_nrf.setDataRate(RF24_2MBPS)
-
-    rx_nrf.setAutoAck(True)
-    tx_nrf.setAutoAck(True)
-
-    rx_nrf.payloadSize = 32
-    tx_nrf.payloadSize = 32
-
-    rx_nrf.setCRCLength(RF24_CRC_8)
-    tx_nrf.setCRCLength(RF24_CRC_8)
-
-    #Low power because we are using them next to one another! 
-
-    rx_nrf.setPALevel(RF24_PA_LOW) 
-    tx_nrf.setPALevel(RF24_PA_LOW)
-    return {
-    'src': args.src if args.base else args.dst,
-    'rx': args.rxchannel if args.base else args.txchannel,
-    'dst':  args.dst if args.base else args.src,
-    'tx': args.txchannel if args.base else args.rxchannel
-}
-
-
-def setupIP(isBase):
-    ipBase = '20.0.0.1'
-    ipMobile = '20.0.0.2'
-    tun = TunTapDevice()
-    tun = TunTapDevice(name='longge')
-    tun.addr = ipBase if isBase else ipMobile
-    tun.dstaddr = ipMobile if isBase else ipBase
-    tun.netmask = '255.255.255.252' # /30
-    tun.mtu = 1500
-    tun.up()
-    print("TUN interface online, with values \n Address:  {} \n Destination: {} \n Network mask: {}".format(tun.addr, tun.dstaddr, tun.netmask) )
-    return tun
-
-
-def doubleTX():
-    ttl = 1
-    print("Activating doubleTX for {} {}".format(ttl, "minute" if ttl == 1 else "minutes"))
+def doubleTX(ttl):
+    print("Activating doubleTX for {} {}".format(ttl, "minute" if ttl == b'\x01' else "minutes"))
     rxEvent.set()
-    test.put("T" + str(ttl))
+    test.put(b'T' + ttl)
 
-def doubleRX():
-    ttl = 1
-    print("Activating doubleRX for {} {}".format(ttl, "minute" if ttl == 1 else "minutes"))
+def doubleRX(ttl):
+    print("Activating doubleRX for {} {}".format(ttl, "minute" if ttl == b'\x01' else "minutes"))
     txEvent.set()
     test.put("R" + str(ttl))
 
@@ -219,7 +205,7 @@ def manageProcesses(vars, tun):
         val = a[0]
         print(val)
         #howLong = int.from_bytes(a[1:], 'big')
-        if val == "T":
+        if val == b'T':
             print("Here?")
             rx_process.join()
             rxEvent.clear()
@@ -240,7 +226,7 @@ def manageProcesses(vars, tun):
             print("This one should not")
             print("???")
             """            
-        elif val == "R":
+        elif val == b'R':
             tx_process.join()
             rxEvent.clear()
             txEvent.clear()
