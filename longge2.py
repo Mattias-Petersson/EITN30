@@ -108,6 +108,7 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
                 incoming = b''
         if rxEvent.is_set():
             break
+        print("Spammy RX")
 """
             packet = readFromNRF(nrf)
             if activateDouble(packet):

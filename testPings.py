@@ -15,6 +15,6 @@ def arbSend(p):
 def testtest() -> tuple[str, str, int]:
     print("Hey")
 def testTurboTX():
-    packet = scape.IP(src="20.0.0.2", dst="20.0.0.1")/b'\xff\xff\xff\xff\xff\x00\x01'
+    packet = scape.IP(src="20.0.0.2", dst="20.0.0.1")/scape.UDP()/b'\xff\xff\xff'
     print(len(packet))
     scape.send(packet, iface="longge")
