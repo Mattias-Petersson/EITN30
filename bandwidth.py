@@ -7,7 +7,7 @@ import time
 from pytun import TunTapDevice
 import scapy.all as scape
 import argparse
-from RF24 import RF24, RF24_PA_LOW, RF24_2MBPS,RF24_CRC_8
+from RF24 import RF24, RF24_PA_LOW, RF24_2MBPS,RF24_CRC_8, RF24_CRC_DISABLED, RF24_PA_MAX
 
 
 manager = Manager()
@@ -29,8 +29,8 @@ def setupNRFModules(args):
     rx_nrf.setDataRate(RF24_2MBPS) 
     tx_nrf.setDataRate(RF24_2MBPS)
 
-    rx_nrf.setAutoAck(True)
-    tx_nrf.setAutoAck(True)
+    rx_nrf.setAutoAck(False)
+    tx_nrf.setAutoAck(False)
 
     rx_nrf.payloadSize = 32
     tx_nrf.payloadSize = 32
@@ -72,6 +72,8 @@ def init(vars, tun):
 
     tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'channel': vars['tx'], 'size':args.size})
     tx_process.start()
+    global startTime
+    startTime = time.monotonic()
     return rx_process, tx_process
 
 #Fragments and returns a list of bytes. The packet of a size > 1270 bytes is assumed to be an IP packet with a minimal header (20b header, 1250b payload).
@@ -102,14 +104,15 @@ def tx(nrf: RF24, address, channel, size):
     nrf.stopListening()
     print("Init TX on channel {}".format(channel))
     nrf.printDetails()
-    smallPacket = bytes(scape.IP(src="20.0.0.2", dst="20.0.0.1")/scape.UDP()/(b'A'*1000))
+    smallPacket = bytes(scape.IP(src="20.0.0.2", dst="20.0.0.1")/scape.UDP()/(b'A'))
     count = 0
     while (time.monotonic() - startTime) <= timeout:
         if txEvent.is_set():
             print("Thread interrupting: {}".format(current_process()))
             break
-        packet = smallPacket #This method blocks until available. True is to ensure that happens if default ever changes.
-        
+        packet = smallPacket
+        #packet = outgoing.get() #This method blocks until available. True is to ensure that happens if default ever changes.
+
         #print("TX: {}".format(packet)) #TODO: DELETE. 
         if len(packet) <= 70 and packet[-4:-1] == b'\xff\xff\xff':
             ttl = packet[-1:]
@@ -119,7 +122,7 @@ def tx(nrf: RF24, address, channel, size):
         fragments = fragment(packet, size)
         for i in fragments:
             count += len(i)
-            nrf.write(i)
+            nrf.writeFast(i)
 
         
     print("TX count: {} bps".format((count * 8) / (time.monotonic() - startTime)))
