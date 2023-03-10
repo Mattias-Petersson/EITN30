@@ -1,7 +1,8 @@
 from collections import defaultdict
 import gzip
 import math
-from multiprocessing import Process, Manager, Event
+from multiprocessing import Process, Manager, Event, current_process
+#import multiprocessing as mp
 import time
 from pytun import TunTapDevice
 import scapy.all as scape
@@ -60,6 +61,18 @@ def setupIP(isBase):
     print("TUN interface online, with values \n Address:  {} \n Destination: {} \n Network mask: {}".format(tun.addr, tun.dstaddr, tun.netmask) )
     return tun
 
+def init(vars, tun):
+    rxEvent.clear()
+    txEvent.clear()
+    rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(vars['src'], 'utf-8'), 'tun': tun, 'channel': vars['rx']})
+    rx_process.start()
+
+    time.sleep(0.001)
+
+    tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'channel': vars['tx'], 'size':args.size})
+    tx_process.start()
+    return rx_process, tx_process
+
 #Fragments and returns a list of bytes. The packet of a size > 1270 bytes is assumed to be an IP packet with a minimal header (20b header, 1250b payload).
 # This method also adds one byte of overhead to determine if a packet was fragmented or not. 
 def fragment(packet, fragmentSize):
@@ -89,14 +102,19 @@ def tx(nrf: RF24, address, channel, size):
     print("Init TX on channel {}".format(channel))
     nrf.printDetails()
     while True:
+        if txEvent.is_set():
+            print("Thread interrupting: {}".format(current_process()))
+            break
         packet = outgoing.get(True) #This method blocks until available. True is to ensure that happens if default ever changes.
-        print("TX: {} \n Len: {}".format(packet, len(packet))) #TODO: DELETE. 
+        print("TX: {}".format(packet)) #TODO: DELETE. 
         if len(packet) <= 70 and packet[-4:-1] == b'\xff\xff\xff':
             ttl = packet[-1:]
+            nrf.write(b'\x00\xff\xff\xff\x01')
             doubleTX(ttl)
         fragments = fragment(packet, size)
         for i in fragments:
             nrf.write(i)
+
 
     
 def rx(nrf: RF24, address, tun: TunTapDevice, channel):
@@ -105,57 +123,27 @@ def rx(nrf: RF24, address, tun: TunTapDevice, channel):
     print("Init RX on channel {}".format(channel))
     nrf.printDetails()
     incoming = b''
-    #currentTime = time.monotonic()
-    #while (time.monotonic() - currentTime) < 1000:
     while True:
+        if rxEvent.is_set():
+            print("Thread interrupting: {}".format(current_process()))
+            break
         hasData, _ = nrf.available_pipe()
         if hasData:
             packet = readFromNRF(nrf)
             print("RX: {}".format(packet))
-            if packet[2:5] == b'\xff\xff\xff':
-                ttl = packet[5:6]
+            if packet[0:4] == b'\x00\xff\xff\xff':
+                ttl = packet[4:5]
                 doubleRX(ttl)
-            incoming += packet[1:]
-            #print("Packet index: {}".format(packet[0:2]))
-            
-            if packet[0:1] == b'\x00':
-                #print("Packet complete. Packet: {info} \n Size: {len}".format(info = scape.bytes_hex(incoming), len = len(incoming)))
-                tun.write(incoming)
-                incoming = b''
-            elif packet[0:1] == b'\x01':
-                decompressedData = incoming[0:20] + gzip.decompress(incoming[20:])
-                tun.write(decompressedData)
-                incoming = b''
-            #else: 
-            #    tun.write(incoming)
-
-"""
-            packet = readFromNRF(nrf)
-            if activateDouble(packet):
-                ttl = packet[-2:]
-                doubleRX(ttl)
-            fragments = packet[0:1]
-            remainingPacket = packet[1:]
-
-            if fragments == b'\x00':
-                incoming += remainingPacket
-                tun.write(incoming)
-            elif fragments == b'\xfe':
-                incoming += remainingPacket
-            else:
-                tun.write(packet)
-            
-            elif fragments == b'\xfd':
-                incoming += remainingPacket
-                tun.write(incoming)
-                incoming = b''
-            elif fragments == b'\xfc':
-                incoming += remainingPacket
-                dataUncomp = gzip.decompress([incoming[20:]])
-                tun.write(incoming[0:20] + dataUncomp)
-            else:
-                tun.write(packet)
-"""
+            else: 
+                incoming += packet[1:]                
+                if packet[0:1] == b'\x00':
+                    #print("Packet complete. Packet: {info} \n Size: {len}".format(info = scape.bytes_hex(incoming), len = len(incoming)))
+                    tun.write(incoming)
+                    incoming = b''
+                elif packet[0:1] == b'\x01':
+                    decompressedData = incoming[0:20] + gzip.decompress(incoming[20:])
+                    tun.write(decompressedData)
+                    incoming = b''
 
 
 def readFromNRF(nrf: RF24):
@@ -168,42 +156,25 @@ def activateDouble(bytes) -> bool:
     return bytes[-4:-1] == b'\xff\xff\xff'
     
 def doubleTX(ttl):
-    print("Activating doubleTX for {} {}".format(ttl, "minute" if ttl == b'\x01' else "minutes"))
+    duration = int.from_bytes(ttl, 'big')
+    print("Activating doubleTX for {} {}".format(duration, "minute" if duration == 1 else "minutes"))
     rxEvent.set()
-    test.put(b'T' + ttl)
+    test.put(["T", duration])
 
 def doubleRX(ttl):
-    print("Activating doubleRX for {} {}".format(ttl, "minute" if ttl == b'\x01' else "minutes"))
+    duration = int.from_bytes(ttl, 'big')
+    print("Activating doubleRX for {} {}".format(duration, "minute" if duration == 1 else "minutes"))
     txEvent.set()
-    test.put("R" + str(ttl))
+    test.put(["R", duration])
 
-def init(vars, tun):
-    rxEvent.clear()
-    txEvent.clear()
-    rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(vars['src'], 'utf-8'), 'tun': tun, 'channel': vars['rx']})
-    rx_process.start()
-
-    time.sleep(0.001)
-
-    tx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'channel': vars['tx'], 'size':args.size})
-    tx_process.start()
-    return rx_process, tx_process
 
 def manageProcesses(vars, tun):
     rx_process, tx_process = init(vars, tun)
     while True:
-        a = test.get()
+        values = test.get()
         rx_nrf.setAutoAck(False)
         tx_nrf.setAutoAck(False)
-        print("I'm up I'm up")
-        #val = whichToDouble.value[0]
-        #howLong = int.from_bytes(whichToDouble.value[1:], 'big')
-        #print(a)
-        val = a[0]
-        print(val)
-        #howLong = int.from_bytes(a[1:], 'big')
-        if val == b'T':
-            print("Here?")
+        if values[0] == "T":
             rx_process.join()
             rxEvent.clear()
             txEvent.clear()
@@ -211,36 +182,32 @@ def manageProcesses(vars, tun):
             tx2.start()
             print("Successful start of two TX-threads.")
 
-            tx_process.join()
-            print("Do we get here? we shouldn't.")
-            """
-            time.sleep(howLong)
+            time.sleep(values[1] * 60)
             txEvent.set()
+            outgoing.put(b'\x00')
             print("Set the TX event flag, now the tx threads should fall in line.")
             tx2.join()
-            print("At least one did.")
-            tx_process.join()
-            print("This one should not")
-            print("???")
-            """            
-        elif val == b'R':
+            txEvent.clear()
+            rx_process, tx_process = init(vars, tun)
+            print("Back to normal configuration of RX/TX pair.")
+                       
+        elif values[0] == "R":
+            outgoing.put(b'\x00')
             tx_process.join()
             rxEvent.clear()
             txEvent.clear()
+
             rx2 = Process(target=rx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'tun': tun, 'channel': vars['tx']})
             rx2.start()
             print("Successful start of two RX-threads.")
-            rx_process.join()
-            print("Do we get here? we shouldn't.")
-            """
-            time.sleep(howLong)
+            
+            time.sleep(values[1] * 60)
             rxEvent.set()
+            print("Set the RX event flag, now the rx threads should fall in line.")
             rx2.join()
-            txEvent.clear()
             rxEvent.clear()
-            tx_process = threading.Thread(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'channel': vars['tx'], 'size':args.size})
-            tx_process.start()
-            """
+            rx_process, tx_process = init(vars, tun)
+            print("Back to normal configuration of RX/TX pair.")
         else:
             raise Exception("How did you get here? Unexpected wakeup, value not set.")
 
@@ -264,16 +231,11 @@ if __name__ == "__main__":
     tun = setupIP(args.base)
     processHandler = Process(target=manageProcesses, args=(vars, tun))
     processHandler.start()
-    #rx_process.start()
-    #time.sleep(0.01)
 
-    freq = defaultdict(int)
     try:    
         while True:
             packet = tun.read(tun.mtu)
-            freq[packet] += 1
             outgoing.put(packet)
-            #print("In main thread, size of the queue is: {}".format(outgoing.qsize()))
 
 
     except KeyboardInterrupt:
@@ -283,6 +245,5 @@ if __name__ == "__main__":
     # Setting the radios to stop listening seems to be best practice. 
     rx_nrf.stopListening()  
     tx_nrf.stopListening()
-    print(sorted(freq.items(), key = lambda x: x[1], reverse=True))
     tun.down()
     print("Threads ended, radios stopped listening, TUN interface down.")
