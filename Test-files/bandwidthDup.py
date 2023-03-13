@@ -21,6 +21,8 @@ txEvent = Event()
 
 startTime = time.monotonic()
 timeout = 20
+Addresses=["1Node","2Node","3Node","4Node","5Node"]
+
 def setupNRFModules(args):
     
     rx_nrf.setDataRate(RF24_2MBPS) 
@@ -72,11 +74,11 @@ def init(vars, tun, base):
     rxEvent.clear()
     txEvent.clear()
     if(base):
-        rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'tun': tun, 'channel': vars['tx']}) 
-        tx_process = Process(target=rx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['src'], 'utf-8'), 'tun': tun, 'channel': vars['rx']})
+        rx_process = Process(target=rx, kwargs={'nrf':rx_nrf, 'address':bytes(Addresses[0], 'utf-8'), 'tun': tun, 'channel': vars['tx']}) 
+        tx_process = Process(target=rx, kwargs={'nrf':tx_nrf, 'address':bytes(Addresses[1], 'utf-8'), 'tun': tun, 'channel': vars['rx']})
     else: 
-        rx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(vars['dst'], 'utf-8'), 'channel': vars['tx'], 'size':args.size})
-        tx_process = Process(target=tx, kwargs={'nrf':rx_nrf, 'address':bytes(vars['src'], 'utf-8'), 'channel': vars['rx'], 'size':args.size})
+        rx_process = Process(target=tx, kwargs={'nrf':tx_nrf, 'address':bytes(Addresses[0], 'utf-8'), 'channel': vars['tx'], 'size':args.size})
+        tx_process = Process(target=tx, kwargs={'nrf':rx_nrf, 'address':bytes(Addresses[1], 'utf-8'), 'channel': vars['rx'], 'size':args.size})
 
     rx_process.start()
     time.sleep(0.1)
@@ -136,7 +138,8 @@ def tx(nrf: RF24, address, channel, size):
 
     
 def rx(nrf: RF24, address, tun: TunTapDevice, channel):
-    nrf.openReadingPipe(1, address)
+    for pipe_n, addr in enumerate(Addresses):
+        nrf.openReadingPipe(pipe_n, bytes(addr, 'utf-8'))
     nrf.startListening()
     print("Init RX on channel {}".format(channel))
     nrf.printDetails()
